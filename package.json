@@ -1,0 +1,39 @@
+{
+  "name": "mixchat-desktop",
+  "version": "0.1.0",
+  "license": "AGPL-3.0",
+  "description": "Electron desktop shell that runs the Mixchat Astro server locally.",
+  "homepage": "https://mixchat.grepfs.xyz/",
+  "author": {
+    "name": "Mixchat",
+    "email": "noreply@mixchat.grepfs.xyz"
+  },
+  "private": true,
+  "type": "module",
+  "main": "src/main/index.mjs",
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "start": "node scripts/run.mjs local",
+    "prepare:server": "node scripts/prepare-mixchat.mjs",
+    "server:build": "pnpm --dir ../Mixchat build && node scripts/prepare-mixchat.mjs",
+    "pack": "pnpm prepare:server && electron-builder --dir",
+    "build": "pnpm server:build && electron-builder"
+  },
+  "dependencies": {
+    "@twurple/auth": "^8.1.4",
+    "@twurple/chat": "^8.1.4",
+    "bgutils-js": "^3.2.0",
+    "dompurify": "^3.4.12",
+    "hls.js": "^1.6.16",
+    "jsdom": "^29.1.1",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-icons": "^5.7.0",
+    "twemoji": "^14.0.2",
+    "youtubei.js": "^17.2.0"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  }
+}

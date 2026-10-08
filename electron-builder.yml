@@ -1,0 +1,31 @@
+appId: xyz.grepfs.mixchat
+productName: Mixchat
+asar: false
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - from: build/mixchat/dist
+    to: mixchat/dist
+    filter:
+      - "**/*"
+  - src/main/**/*
+  - src/preload/**/*
+  - package.json
+  - "!**/*.map"
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network
+
+win:
+  target:
+    - nsis
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.social-networking
