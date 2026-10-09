@@ -116,6 +116,7 @@ sudo chmod 4755 node_modules/.pnpm/electron@*/node_modules/electron/dist/chrome-
 
 - Only Linux and Windows builds are currently exercised. macOS is configured but
   untested.
-- Builds are unsigned (default Electron icon), so Windows SmartScreen will warn.
+- The app icon is generated from Mixchat's `public/favicon.png` (see
+  `build/icon.png`). Builds are unsigned, so Windows SmartScreen will warn.
 
 Licensed under AGPL-3.0, same as Mixchat.

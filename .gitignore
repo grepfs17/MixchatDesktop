@@ -1,7 +1,7 @@
 node_modules/
 release/
 dist/
-build/
+build/mixchat/
 .env
 *.log
 .DS_Store
