@@ -23,8 +23,15 @@ pnpm install
 Build the Mixchat server bundle once (also patches it for cross-platform use):
 
 ```bash
-pnpm server:build     # pnpm --dir ../Mixchat build + prepare:server
+pnpm server:build     # builds Mixchat + prepares the bundle
 ```
+
+By default (`../Mixchat/.env`) the build bakes the OAuth client secrets into the
+app. To build a **no-secret** app instead, create a `.env.desktop` profile (see
+`.env.desktop.example`) with a Public Twitch app and a Google "Desktop app"
+OAuth client. When `.env.desktop` is present, `pnpm server:build` builds in
+desktop mode: Twitch uses the Device Code Grant (no secret) and Google uses
+PKCE with its Desktop-app client secret.
 
 Or, if `../Mixchat/dist` already exists, just run:
 
@@ -100,6 +107,30 @@ changes, before packaging.
   absolute build-machine paths Astro bakes into `entry.mjs` (client/server dirs
   and session storage) into portable values. Without this, the same bundle fails
   on a different OS (`fileURLToPath` rejects `file:///home/...` on Windows).
+
+## OAuth & secrets
+
+Two operating modes, chosen by whether `.env.desktop` exists at build time:
+
+| | Web mode (default) | Desktop mode (`.env.desktop`) |
+|---|---|---|
+| Twitch login | Auth code popup (Confidential app) | Device Code Grant (Public app) |
+| Google login | OAuth popup (Web client + secret) | PKCE + Desktop app client |
+| Secrets in app | baked into `dist/server` | Twitch: **none**; Google: desktop client secret (non-confidential) |
+
+Desktop mode requires:
+- A Twitch app with **Client Type = Public** → `PUBLIC_TWITCH_CLIENT_ID`.
+- A Google **"Desktop app"** OAuth client with the loopback redirect
+  `http://localhost:3000/auth/youtube/callback` → `PUBLIC_YOUTUBE_CLIENT_ID` +
+  `YOUTUBE_CLIENT_SECRET` (Google rejects PKCE without the secret).
+
+Twitch is fully secretless via the Device Code Grant. Google does not offer a
+secretless flow, so its Desktop-app client secret is embedded (Google treats
+desktop-app secrets as non-confidential).
+
+These are separate from the hosted website's confidential Twitch app / Web
+Google client; the website is unaffected. The desktop window must load
+`http://localhost:3000` so cookies match the redirect host.
 
 ## Linux sandbox note
 

@@ -3,5 +3,6 @@ release/
 dist/
 build/mixchat/
 .env
+.env.desktop
 *.log
 .DS_Store

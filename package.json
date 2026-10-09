@@ -15,8 +15,9 @@
     "dev": "node scripts/run.mjs dev",
     "start": "node scripts/run.mjs local",
     "prepare:server": "node scripts/prepare-mixchat.mjs",
-    "server:build": "pnpm --dir ../Mixchat build && node scripts/prepare-mixchat.mjs",
+    "server:build": "node scripts/build-mixchat.mjs && node scripts/prepare-mixchat.mjs",
     "pack": "pnpm prepare:server && electron-builder --dir",
+    "pack:win": "pnpm server:build && electron-builder --win --dir && node scripts/make-portable-zip.mjs",
     "build": "pnpm server:build && electron-builder"
   },
   "dependencies": {
