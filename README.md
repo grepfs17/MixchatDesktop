@@ -76,14 +76,24 @@ build time** from `../Mixchat/.env`, so they are not needed at runtime.
 ## Packaging
 
 ```bash
+pnpm dist             # build all release artifacts (Linux + Windows) and clean
+pnpm build            # full installers for the host OS
 pnpm pack             # unpacked app in release/<platform>-unpacked
-pnpm build            # full installers
+pnpm pack:win         # Windows unpacked + portable zip (cross-build with Wine)
+pnpm clean            # remove everything in release/ except the final artifacts
 ```
 
-- **Linux**: AppImage + deb (produced directly).
-- **Windows**: NSIS installer + single-file portable exe. Cross-building from
-  Linux requires Wine (`sudo apt install wine64`).
-- **macOS**: dmg (build on macOS).
+`pnpm dist` leaves only the shippable artifacts in `release/`:
+
+- **Linux**: `mixchat-desktop_<version>_amd64.deb` and `Mixchat-<version>.AppImage`
+- **Windows**: `Mixchat Setup <version>.exe` (NSIS installer) and
+  `Mixchat-<version>-win-x64-portable.zip` (unpacked, no install; includes
+  `.env.example`)
+
+`scripts/clean-release.mjs` then deletes intermediates (`*-unpacked/`,
+`*.blockmap`, `latest*.yml`, `builder-debug.yml`) and stale versions, keeping only
+those artifacts plus the `.icon-ico/` icon. Cross-building Windows targets from
+Linux requires Wine (`sudo apt install wine64`).
 
 `electron-builder.yml` packages the patched bundle from `build/mixchat/dist`.
 Re-run `pnpm prepare:server` (or `pnpm server:build`) whenever Mixchat's `dist`

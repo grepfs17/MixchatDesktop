@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,11 +7,14 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const { version } = JSON.parse(
+  readFileSync(path.join(projectRoot, "package.json"), "utf8"),
+);
 const unpacked = path.join(projectRoot, "release", "win-unpacked");
 const zipPath = path.join(
   projectRoot,
   "release",
-  "Mixchat-win-x64-portable.zip",
+  `Mixchat-${version}-win-x64-portable.zip`,
 );
 
 if (!existsSync(unpacked)) {

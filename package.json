@@ -16,9 +16,11 @@
     "start": "node scripts/run.mjs local",
     "prepare:server": "node scripts/prepare-mixchat.mjs",
     "server:build": "node scripts/build-mixchat.mjs && node scripts/prepare-mixchat.mjs",
+    "clean": "node scripts/clean-release.mjs",
     "pack": "pnpm prepare:server && electron-builder --dir",
-    "pack:win": "pnpm server:build && electron-builder --win --dir && node scripts/make-portable-zip.mjs",
-    "build": "pnpm server:build && electron-builder"
+    "pack:win": "pnpm server:build && electron-builder --win --dir && node scripts/make-portable-zip.mjs && pnpm clean",
+    "build": "pnpm server:build && electron-builder && pnpm clean",
+    "dist": "pnpm server:build && electron-builder --linux && electron-builder --win && node scripts/make-portable-zip.mjs && pnpm clean"
   },
   "dependencies": {
     "@twurple/auth": "^8.1.4",
