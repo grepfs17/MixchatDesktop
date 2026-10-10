@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSecretCheck } from "./check-secrets.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -65,3 +66,10 @@ if (urlReplacements === 0 && sessionReplacements === 0) {
     "[prepare] WARNING: no baked absolute paths were found. The bundle may already be portable, or the expected build layout changed.",
   );
 }
+
+const { ok: secretsOk } = await runSecretCheck({
+  distDir: outDist,
+  mixchatRoot,
+  projectRoot,
+});
+if (!secretsOk) process.exit(1);

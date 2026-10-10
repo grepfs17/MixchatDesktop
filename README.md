@@ -142,6 +142,28 @@ These are separate from the hosted website's confidential Twitch app / Web
 Google client; the website is unaffected. The desktop window must load
 `http://localhost:3000` so cookies match the redirect host.
 
+## Security & shipping
+
+Distributed desktop binaries are fully readable by end users, so anything baked
+into the build must be treated as public. Desktop builds ship only public
+client IDs plus the Google **Desktop-app** client secret, which Google classes
+as non-confidential. Twitch ships no secret (Device Code Grant), and the
+hosted-site secrets / YouTube proxy token are never embedded.
+
+A build guard enforces this: `scripts/check-secrets.mjs` scans the compiled
+bundle and **fails the build** if a confidential value (web Twitch/Google
+secret, proxy token) appears — including the case where `.env.desktop` is
+missing and the build silently falls back to web mode. It runs at the end of
+`pnpm server:build` / `pnpm prepare:server`, or on demand:
+
+```bash
+pnpm check:secrets
+```
+
+See [SECURITY.md](./SECURITY.md) for the full threat model, why the Google
+desktop secret is safe to embed, and how to isolate the OAuth client (dedicated
+Google Cloud project, quotas and abuse alerts).
+
 ## Linux sandbox note
 
 On distros that restrict unprivileged user namespaces (e.g. Ubuntu 24.04),

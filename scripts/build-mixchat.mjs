@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnvFile } from "../src/main/mixchat-server.mjs";
+import { runSecretCheck } from "./check-secrets.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -43,4 +44,15 @@ const res = spawnSync("pnpm", ["--dir", mixchatRoot, "build"], {
   stdio: "inherit",
   env,
 });
-process.exit(res.status ?? 1);
+if ((res.status ?? 1) !== 0) process.exit(res.status ?? 1);
+
+// Refuse to continue if confidential secrets (the hosted site's Twitch/Google
+// secrets, the proxy token) ended up in the compiled bundle. A missing
+// `.env.desktop` makes the build fall back to web mode and bake those secrets,
+// so this guard also catches that footgun.
+const { ok } = await runSecretCheck({
+  distDir: path.join(mixchatRoot, "dist"),
+  mixchatRoot,
+  projectRoot,
+});
+process.exit(ok ? 0 : 1);

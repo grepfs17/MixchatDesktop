@@ -17,6 +17,7 @@
     "prepare:server": "node scripts/prepare-mixchat.mjs",
     "server:build": "node scripts/build-mixchat.mjs && node scripts/prepare-mixchat.mjs",
     "clean": "node scripts/clean-release.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs",
     "pack": "pnpm prepare:server && electron-builder --dir",
     "pack:win": "pnpm server:build && electron-builder --win --dir && node scripts/make-portable-zip.mjs && pnpm clean",
     "build": "pnpm server:build && electron-builder && pnpm clean",
