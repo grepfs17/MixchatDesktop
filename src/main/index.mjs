@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, dialog } from "electron";
+import { app, BrowserWindow, Menu, shell, dialog, nativeTheme } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,11 @@ for (const [key, value] of Object.entries(configEnv)) {
 const MODE = process.env.MIXCHAT_MODE || (app.isPackaged ? "packaged" : "local");
 const PORT = Number(process.env.MIXCHAT_PORT || 3000);
 const HOST = process.env.MIXCHAT_HOST || "127.0.0.1";
+
+// Force dark for every web contents (main window + OAuth popups). Without this
+// Chromium follows the OS scheme, so Google/YouTube/Twitch auth pages render
+// light even though the app itself is dark.
+nativeTheme.themeSource = "dark";
 
 let serverChild = null;
 let mainWindow = null;
@@ -155,6 +160,7 @@ function attachSecurity(window, appOrigin) {
           width: 600,
           height: 760,
           autoHideMenuBar: true,
+          backgroundColor: "#0e0e10",
           webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
