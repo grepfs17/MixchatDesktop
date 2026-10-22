@@ -78,12 +78,15 @@ build time** from `../Mixchat/.env`, so they are not needed at runtime.
 ```bash
 pnpm dist             # build all release artifacts (Linux + Windows) and clean
 pnpm build            # full installers for the host OS
-pnpm pack             # unpacked app in release/<platform>-unpacked
+pnpm release          # build for the host OS and publish to GitHub Releases
+pnpm run pack         # unpacked app in release/<platform>-unpacked
 pnpm pack:win         # Windows unpacked + portable zip (cross-build with Wine)
 pnpm clean            # remove everything in release/ except the final artifacts
 ```
 
-`pnpm dist` leaves only the shippable artifacts in `release/`:
+> Use `pnpm run pack` (not `pnpm pack`, which is pnpm's own tarball command).
+
+`pnpm dist` leaves the shippable artifacts in `release/`:
 
 - **Linux**: `mixchat-desktop_<version>_amd64.deb` and `Mixchat-<version>.AppImage`
 - **Windows**: `Mixchat Setup <version>.exe` (NSIS installer) and
@@ -91,13 +94,55 @@ pnpm clean            # remove everything in release/ except the final artifacts
   `.env.example`)
 
 `scripts/clean-release.mjs` then deletes intermediates (`*-unpacked/`,
-`*.blockmap`, `latest*.yml`, `builder-debug.yml`) and stale versions, keeping only
-those artifacts plus the `.icon-ico/` icon. Cross-building Windows targets from
-Linux requires Wine (`sudo apt install wine64`).
+`builder-debug.yml`) and stale versions, keeping the artifacts above plus the
+update feed files (`latest*.yml`, `*.blockmap`) that electron-updater needs.
+Cross-building Windows targets from Linux requires Wine (`sudo apt install
+wine64`).
 
 `electron-builder.yml` packages the patched bundle from `build/mixchat/dist`.
 Re-run `pnpm prepare:server` (or `pnpm server:build`) whenever Mixchat's `dist`
 changes, before packaging.
+
+## Auto-update
+
+Packaged builds check for updates on launch using **electron-updater** against
+this repository's GitHub Releases (`publish` in `electron-builder.yml`). When a
+newer version exists the user is asked before downloading, then asked before
+restarting to install. A **Help → Check for Updates…** menu item triggers a
+manual check. Update failures are logged, never fatal.
+
+To publish a release:
+
+```bash
+GH_TOKEN=<personal access token with repo scope> pnpm release
+```
+
+This builds the host OS's artifacts (including `latest*.yml` + `*.blockmap`),
+creates/updates the GitHub release and uploads them. Because the app itself
+embeds an OAuth client secret, **always publish an update when rotating it** —
+`electron-builder.yml` guarantees the metadata is shipped so existing installs
+can pick it up.
+
+- Supported: **AppImage** (Linux) and **NSIS** (Windows).
+- Not supported by electron-updater: the `.deb` package and the portable ZIP —
+  those users must reinstall manually.
+- Updates are code-signature verified where the platform provides it, which is
+  why signing (below) matters.
+
+## Code signing
+
+Binaries are unsigned by default. To sign, provide credentials via the
+environment — no secrets are stored in the repo.
+
+**Windows (NSIS)** — set:
+
+```bash
+CSC_LINK=/path/to/cert.pfx        # or a base64 of the .pfx
+CSC_KEY_PASSWORD=<password>
+```
+
+An EV/OV code-signing certificate avoids the SmartScreen warning. Linux builds
+(AppImage/deb) carry no signature.
 
 ## How it works
 
@@ -177,9 +222,8 @@ sudo chmod 4755 node_modules/.pnpm/electron@*/node_modules/electron/dist/chrome-
 
 ## Notes
 
-- Only Linux and Windows builds are currently exercised. macOS is configured but
-  untested.
 - The app icon is generated from Mixchat's `public/favicon.png` (see
-  `build/icon.png`). Builds are unsigned, so Windows SmartScreen will warn.
+  `build/icon.png`). Unsigned builds make Windows SmartScreen warn — see
+  [Code signing](#code-signing).
 
-Licensed under AGPL-3.0, same as Mixchat.
+Licensed under AGPL-3.0 (see [LICENSE](./LICENSE)), same as Mixchat.

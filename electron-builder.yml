@@ -5,6 +5,14 @@ directories:
   output: release
   buildResources: build
 
+# Auto-update feed. electron-updater reads the generated app-update.yml at
+# runtime and pulls release metadata from GitHub. Publishing needs a token:
+#   GH_TOKEN=... pnpm run release
+publish:
+  provider: github
+  owner: grepfs17
+  repo: MixchatDesktop
+
 files:
   - from: build/mixchat/dist
     to: mixchat/dist
@@ -24,8 +32,6 @@ linux:
 win:
   target:
     - nsis
-
-mac:
-  target:
-    - dmg
-  category: public.app-category.social-networking
+  # Code signing: set CSC_LINK (path or base64 of the .pfx) and
+  # CSC_KEY_PASSWORD in the environment. electron-builder signs automatically
+  # when they are present; unsigned local builds still work.

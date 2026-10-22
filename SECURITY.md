@@ -98,6 +98,28 @@ It scans the compiled output for:
 This also makes the "forgot `.env.desktop`" footgun safe: such a build bakes the
 web secrets and the guard refuses to proceed.
 
+## Update channel
+
+Packaged builds self-update via **electron-updater** from this repository's
+GitHub Releases. This is what makes secret rotation actionable: rotating the
+Google desktop client secret only protects users once they install a build that
+embeds the new value, so publishing an update is part of the rotation procedure
+(see step 5 above).
+
+Update integrity depends on the transport and, where available, code signing:
+
+- Downloads come from GitHub Releases over HTTPS and are verified by
+  electron-updater against the published `latest*.yml` checksums.
+- **Sign the Windows installer** (Authenticode) so the OS verifies the publisher
+  before replacing the app; see the "Code signing" section of the
+  [README](./README.md). Unsigned builds rely on HTTPS alone.
+- Auto-update is enabled for AppImage and NSIS (Windows). The `.deb` package and
+  portable ZIP do not self-update and must be reinstalled manually.
+
+A stale install that never updates keeps the old embedded secret until the user
+reinstalls; there is no remote kill switch. Publish updates promptly when
+rotating credentials.
+
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately to

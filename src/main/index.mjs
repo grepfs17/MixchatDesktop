@@ -9,6 +9,7 @@ import {
   startMixchatServer,
   waitForServer,
 } from "./mixchat-server.mjs";
+import { checkForUpdates, setupAutoUpdater } from "./updater.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -205,6 +206,15 @@ function buildMenu(window) {
       label: "Window",
       submenu: [{ role: "minimize" }, { role: "close" }],
     },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates…",
+          click: () => checkForUpdates(),
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -253,7 +263,10 @@ async function createWindow() {
   await mainWindow.loadURL(target.url);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  await createWindow();
+  setupAutoUpdater({ getWindow: () => mainWindow });
+});
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
