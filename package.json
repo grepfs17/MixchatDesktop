@@ -36,7 +36,7 @@
     "react-dom": "19.2.7",
     "react-icons": "^5.7.0",
     "twemoji": "^14.0.2",
-    "youtubei.js": "^17.2.0"
+    "youtubei.js": "18.1.0"
   },
   "devDependencies": {
     "electron": "^44.7.0",
