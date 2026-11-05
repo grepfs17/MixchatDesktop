@@ -1,6 +1,6 @@
 {
   "name": "mixchat-desktop",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "license": "AGPL-3.0",
   "description": "Electron desktop shell that runs the Mixchat Astro server locally.",
   "homepage": "https://mixchat.grepfs.xyz/",
