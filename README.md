@@ -6,11 +6,6 @@ runtime.
 
 The Mixchat source is consumed as a sibling checkout and is not forked here.
 
-> The Tauri build uses a different WebView data directory than the old Electron
-> build. Existing sessions, settings, and chat history are not migrated
-> automatically. Uninstall the Electron app before installing the Tauri build,
-> then sign in again.
-
 ## Requirements
 
 - Windows 10 or 11
