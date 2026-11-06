@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseEnvFile } from "../src/main/mixchat-server.mjs";
+import { parseEnvFile } from "./env.mjs";
 
 /**
  * Build guard: fail the desktop build if any *confidential* secret (the hosted

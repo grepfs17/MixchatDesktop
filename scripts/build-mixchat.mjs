@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEnvFile } from "../src/main/mixchat-server.mjs";
+import { parseEnvFile } from "./env.mjs";
 import { runSecretCheck } from "./check-secrets.mjs";
 
 const projectRoot = path.resolve(
@@ -40,7 +40,8 @@ if (desktopMode) {
   );
 }
 
-const res = spawnSync("pnpm", ["--dir", mixchatRoot, "build"], {
+const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const res = spawnSync(pnpm, ["--dir", mixchatRoot, "build"], {
   stdio: "inherit",
   env,
 });
