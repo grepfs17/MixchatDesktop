@@ -29,6 +29,7 @@ pub fn run() {
         .menu(|app| menu::build(app))
         .on_menu_event(|app, event| menu::handle(app, event))
         .setup(|app| {
+            app.handle().set_theme(Some(tauri::Theme::Dark));
             let handle = app.handle().clone();
             let app_config = AppConfig::load(&handle)?;
             let logger = Arc::new(Logger::new(&app_config.log_dir)?);
@@ -124,6 +125,7 @@ fn open_twitch_child<R: tauri::Runtime>(
 
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title(title)
+        .theme(Some(tauri::Theme::Dark))
         .inner_size(600.0, 760.0)
         .min_inner_size(400.0, 500.0)
         .on_navigation(move |target| {
@@ -147,6 +149,7 @@ fn open_twitch_child<R: tauri::Runtime>(
             NewWindowResponse::Deny
         })
         .build()?;
+    let _ = window.set_theme(Some(tauri::Theme::Dark));
 
     // The player only sees the new cookies after its iframe is recreated.
     if reload_main_on_close {
@@ -228,6 +231,7 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
 
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title("Mixchat")
+        .theme(Some(tauri::Theme::Dark))
         .inner_size(1600.0, 900.0)
         .min_inner_size(900.0, 600.0)
         .initialization_script("window.__MIXCHAT_SHELL__ = 'tauri';")
@@ -277,6 +281,7 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
             NewWindowResponse::Deny
         })
         .build()?;
+    let _ = window.set_theme(Some(tauri::Theme::Dark));
 
     let _ = window.set_focus();
     Ok(())
