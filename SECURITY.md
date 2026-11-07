@@ -129,8 +129,3 @@ web secrets and the guard refuses to proceed.
 Auto-update is not configured in this build. Windows installers are manual
 installs for now. When auto-update is added, sign the NSIS installer and the
 update manifests before publishing.
-
-## Reporting a vulnerability
-
-Please report suspected vulnerabilities privately to
-`noreply@mixchat.grepfs.xyz`. Do not open a public issue for security reports.
