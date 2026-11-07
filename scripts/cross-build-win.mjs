@@ -9,7 +9,11 @@ const projectRoot = path.resolve(
   "..",
 );
 const target = "x86_64-pc-windows-msvc";
-const image = "messense/cargo-xwin:main";
+// Pinned by digest (not tag) so a compromised `main` cannot silently
+// replace the toolchain that produces Mixchat.exe.
+// Digest of messense/cargo-xwin:main as of 2026-11-07.
+const image =
+  "messense/cargo-xwin@sha256:c6602bccbdf8a72247e986870a4a0044572d7c6dd575240f6ed3af7d3686cdf9";
 const cacheRoot = path.join(os.homedir(), ".cache", "mixchat-tauri");
 
 if (process.platform !== "linux") {

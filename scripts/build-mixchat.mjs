@@ -14,8 +14,10 @@ const mixchatRoot = process.env.MIXCHAT_DIR
   : path.resolve(projectRoot, "..", "Mixchat");
 
 // Desktop build profile. When present, the Mixchat bundle is built in
-// "desktop" mode: public-client OAuth (Twitch Device Code, Google PKCE) and
-// NO client secrets baked in. See .env.desktop.example.
+// "desktop" mode: public-client OAuth (Twitch Device Code, Google PKCE).
+// The hosted site's confidential web secrets are stripped; Google's
+// non-confidential Desktop-app client secret is kept when provided.
+// See .env.desktop.example.
 const desktopEnvFile = path.join(projectRoot, ".env.desktop");
 const desktopMode = existsSync(desktopEnvFile);
 
