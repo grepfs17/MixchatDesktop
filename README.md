@@ -4,15 +4,15 @@ Tauri 2 desktop shell for Mixchat on Windows. It runs Mixchat's
 Astro Node server as a bundled sidecar and opens the UI in the system WebView2
 runtime.
 
-The Mixchat source is consumed as a sibling checkout (`../Mixchat`) and is not
-forked here.
+The [Mixchat](https://github.com/grepfs17/Mixchat) source is consumed as a
+sibling checkout (`../Mixchat`) and is not forked here.
 
 ## Requirements
 
 - Windows 10 or 11
 - Node.js LTS and pnpm
 - Rust toolchain (`rustup`, `cargo`)
-- The Mixchat checkout at `../Mixchat`
+- The [Mixchat](https://github.com/grepfs17/Mixchat) checkout at `../Mixchat`
 - A `.env.desktop` profile with OAuth client IDs
 
 The NSIS installer embeds the WebView2 bootstrapper, so a fresh machine can
@@ -20,9 +20,10 @@ install the runtime during setup.
 
 ## Setup
 
-Install Mixchat's dependencies once:
+Clone Mixchat next to this repo and install its dependencies once:
 
 ```bash
+git clone https://github.com/grepfs17/Mixchat.git ../Mixchat
 # inside ../Mixchat
 pnpm install
 ```
@@ -203,4 +204,5 @@ Windows job object prevents orphan processes.
 
 ## License
 
-Licensed under AGPL-3.0, same as Mixchat. See [LICENSE](./LICENSE).
+Licensed under AGPL-3.0, same as [Mixchat](https://github.com/grepfs17/Mixchat).
+See [LICENSE](./LICENSE).
