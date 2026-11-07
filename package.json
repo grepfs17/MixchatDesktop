@@ -31,7 +31,8 @@
     "tauri:build": "tauri build",
     "tauri:build:portable": "tauri build --no-bundle --config src-tauri/tauri.portable.conf.json && node scripts/make-portable.mjs",
     "tauri:build:portable:win": "node scripts/cross-build-win.mjs",
-    "tauri:portable": "node scripts/make-portable.mjs"
+    "tauri:portable": "node scripts/make-portable.mjs",
+    "release": "node scripts/release-win.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4"

@@ -1,0 +1,144 @@
+# Builds the Windows x64 release artifacts (NSIS installer + portable zip)
+# on every run; publishes them to a GitHub Release when a v* tag is pushed.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MIXCHAT_DIR: ${{ github.workspace }}/Mixchat
+  MIXCHAT_REF: main
+
+jobs:
+  windows-x64:
+    name: Windows x64 (installer + portable)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      mixchat_sha: ${{ steps.mixchat.outputs.sha }}
+    steps:
+      - name: Checkout MixchatDesktop
+        uses: actions/checkout@v4
+
+      - name: Checkout Mixchat
+        uses: actions/checkout@v4
+        with:
+          repository: grepfs17/Mixchat
+          ref: ${{ env.MIXCHAT_REF }}
+          path: Mixchat
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Cache Node sidecar downloads
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/.cache/node
+          key: node-sidecar-${{ runner.os }}
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          pnpm install
+          pnpm --dir Mixchat install
+
+      - name: Enable desktop build profile
+        shell: bash
+        env:
+          DESKTOP_TWITCH_CLIENT_ID: ${{ secrets.DESKTOP_TWITCH_CLIENT_ID }}
+          DESKTOP_YOUTUBE_CLIENT_ID: ${{ secrets.DESKTOP_YOUTUBE_CLIENT_ID }}
+          DESKTOP_YOUTUBE_CLIENT_SECRET: ${{ secrets.DESKTOP_YOUTUBE_CLIENT_SECRET }}
+        run: |
+          cp .env.desktop.example .env.desktop
+          {
+            echo "PUBLIC_TWITCH_CLIENT_ID=${DESKTOP_TWITCH_CLIENT_ID}"
+            echo "PUBLIC_YOUTUBE_CLIENT_ID=${DESKTOP_YOUTUBE_CLIENT_ID}"
+            echo "YOUTUBE_CLIENT_SECRET=${DESKTOP_YOUTUBE_CLIENT_SECRET}"
+          } >> .env.desktop
+
+      - name: Guard tag against package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag v$tag does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Record Mixchat source revision
+        id: mixchat
+        shell: bash
+        run: echo "sha=$(git -C Mixchat rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts
+        run: pnpm release
+
+      - name: Collect artifacts and checksums
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe dist/
+          cp src-tauri/target/portable/*.zip dist/
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixchat-windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: windows-x64
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-windows-x64
+          path: dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MIXCHAT_SHA: ${{ needs.windows-x64.outputs.mixchat_sha }}
+        run: |
+          gh api "repos/${GH_REPO}/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" --jq .body > notes.md
+          {
+            echo "Built against [Mixchat](https://github.com/grepfs17/Mixchat) @ \`${MIXCHAT_SHA}\`."
+            echo
+            cat notes.md
+          } > body.md
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Mixchat $GITHUB_REF_NAME" \
+            --notes-file body.md
