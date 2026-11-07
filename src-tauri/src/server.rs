@@ -20,6 +20,10 @@ pub struct ServerState {
     restarting: AtomicBool,
     attempts: AtomicU32,
     generation: AtomicU64,
+    /// Set once the sidecar prints its "Server listening" line. Proves *our*
+    /// child bound the port (an attacker's squatter on :3000 cannot forge
+    /// output on the child's stdout pipe).
+    ready: AtomicBool,
 }
 
 impl ServerState {
@@ -33,6 +37,7 @@ impl ServerState {
             restarting: AtomicBool::new(false),
             attempts: AtomicU32::new(0),
             generation: AtomicU64::new(0),
+            ready: AtomicBool::new(false),
         }
     }
 
@@ -114,9 +119,21 @@ impl ServerState {
         for (key, value) in &self.config.env {
             command = command.env(key, value);
         }
+        // Readiness detection depends on the sidecar's "Server listening"
+        // line; never let env (file or inherited) silence it.
+        let astro_logging = std::env::var("ASTRO_NODE_LOGGING")
+            .ok()
+            .or_else(|| self.config.env.get("ASTRO_NODE_LOGGING").cloned());
+        if astro_logging
+            .map(|v| v.eq_ignore_ascii_case("disabled"))
+            .unwrap_or(true)
+        {
+            command = command.env("ASTRO_NODE_LOGGING", "info");
+        }
 
         let (mut rx, child) = command.spawn().map_err(|error| error.to_string())?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.ready.store(false, Ordering::SeqCst);
 
         self.logger.info(format!(
             "server started pid={} entry={}",
@@ -133,9 +150,11 @@ impl ServerState {
                         // The server prints its listening line on startup, so
                         // output means the restart counter can be cleared.
                         state.attempts.store(0, Ordering::SeqCst);
-                        state
-                            .logger
-                            .server("stdout", &String::from_utf8_lossy(&bytes));
+                        let text = String::from_utf8_lossy(&bytes);
+                        if text.to_ascii_lowercase().contains("listening") {
+                            state.ready.store(true, Ordering::SeqCst);
+                        }
+                        state.logger.server("stdout", &text);
                     }
                     CommandEvent::Stderr(bytes) => {
                         state
@@ -173,11 +192,30 @@ impl ServerState {
 
     async fn wait_for_health(&self, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
+        let supervised = self.config.mode != Mode::Dev;
         while Instant::now() < deadline {
             if self.shutting_down.load(Ordering::SeqCst) {
                 return Err("app is shutting down".to_string());
             }
-            if http_ok(&self.config.host, self.config.port) {
+            // Fail fast if the sidecar died (e.g. lost a port race to a
+            // squatter and exited with EADDRINUSE) instead of polling the
+            // squatter's HTTP 200 until the timeout.
+            if supervised && !self.ready.load(Ordering::SeqCst) {
+                let child_alive = self.child.lock().unwrap().is_some();
+                if !child_alive {
+                    return Err(format!(
+                        "server process exited before it became ready on port {} (is another service bound to it?)",
+                        self.config.port
+                    ));
+                }
+            }
+            let ready = !supervised || self.ready.load(Ordering::SeqCst);
+            if ready && http_ok(&self.config.host, self.config.port) {
+                // Re-check liveness after the 200: the child must still own
+                // the process slot we spawned.
+                if supervised && self.child.lock().unwrap().is_none() {
+                    return Err("server process exited during health check".to_string());
+                }
                 self.logger.info(format!(
                     "server ready at http://{}:{}",
                     self.config.host, self.config.port

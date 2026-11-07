@@ -39,11 +39,6 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn load(app: &AppHandle) -> Result<Self, Box<dyn Error>> {
-        let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-
         // Portable builds override the app directories with a relative path
         // such as ./app-data. Anchor it to the executable so the server cwd
         // does not depend on where the app was launched from.
@@ -52,9 +47,23 @@ impl AppConfig {
         std::fs::create_dir_all(&data_dir)?;
         std::fs::create_dir_all(&log_dir)?;
 
-        let file_env = load_first_env_file(&[
+        // `.env` search order. The repository (CARGO_MANIFEST_DIR) and cwd
+        // candidates are debug-only: a release binary must not read a planted
+        // `.env` from the build machine's source tree or the launch directory
+        // (classic hijack vector next to a signed executable).
+        let mut env_candidates: Vec<Option<PathBuf>> = vec![
             std::env::var_os("MIXCHAT_CONFIG").map(PathBuf::from),
-            Some(project_root.join(".env")),
+        ];
+        #[cfg(debug_assertions)]
+        {
+            env_candidates.push(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .map(|root| root.join(".env")),
+            );
+        }
+        env_candidates.extend([
             Some(data_dir.join(".env")),
             app.path()
                 .app_config_dir()
@@ -63,8 +72,12 @@ impl AppConfig {
             std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.join(".env"))),
-            std::env::current_dir().ok().map(|p| p.join(".env")),
         ]);
+        #[cfg(debug_assertions)]
+        {
+            env_candidates.push(std::env::current_dir().ok().map(|p| p.join(".env")));
+        }
+        let file_env = load_first_env_file(&env_candidates);
 
         let setting = |key: &str| {
             std::env::var(key)
@@ -73,23 +86,45 @@ impl AppConfig {
         };
 
         let mode = Mode::resolve(setting("MIXCHAT_MODE"));
-        let host = setting("MIXCHAT_HOST").unwrap_or_else(|| "127.0.0.1".to_string());
+        let mut host = setting("MIXCHAT_HOST").unwrap_or_else(|| "127.0.0.1".to_string());
         let port = setting("MIXCHAT_PORT")
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(3000);
         let url = setting("MIXCHAT_URL")
             .unwrap_or_else(|| format!("http://localhost:{port}"));
 
+        // Packaged builds must not expose the local server to the LAN by
+        // accident: privileged endpoints (/api/desktop/open, auth handoff)
+        // assume a loopback-only peer.
+        if mode == Mode::Packaged && !is_loopback_host(&host) {
+            eprintln!(
+                "[mixchat] MIXCHAT_HOST={host} is not loopback; forcing 127.0.0.1 in packaged mode"
+            );
+            host = "127.0.0.1".to_string();
+        }
+
         let server_entry = match mode {
             Mode::Dev => None,
-            Mode::Local => Some(
-                project_root
-                    .join("build")
-                    .join("mixchat")
-                    .join("dist")
-                    .join("server")
-                    .join("entry.mjs"),
-            ),
+            Mode::Local => {
+                // Local mode only runs from a source checkout (pnpm start /
+                // tauri dev). Resolve the repo root without embedding the
+                // build machine's absolute path in release binaries.
+                #[cfg(debug_assertions)]
+                let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                #[cfg(not(debug_assertions))]
+                let project_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                Some(
+                    project_root
+                        .join("build")
+                        .join("mixchat")
+                        .join("dist")
+                        .join("server")
+                        .join("entry.mjs"),
+                )
+            }
             Mode::Packaged => {
                 // Portable builds keep resources next to the executable,
                 // while Linux packages install them under /usr/lib. Prefer the
@@ -120,9 +155,15 @@ impl AppConfig {
 
         // File values fill gaps. The child inherits process env, so anything
         // already exported must not be overwritten here.
+        //
+        // Only allowlisted keys from `.env` files are forwarded: a planted
+        // file could otherwise set NODE_OPTIONS / LD_PRELOAD / OPENSSL_CONF
+        // and execute code inside the sidecar under a clean binary.
         let mut env: HashMap<String, String> = file_env
             .into_iter()
-            .filter(|(key, _)| std::env::var_os(key).is_none())
+            .filter(|(key, value)| {
+                std::env::var_os(key).is_none() && is_sidecar_env_key(key) && !value.is_empty()
+            })
             .collect();
 
         env.insert("PORT".to_string(), port.to_string());
@@ -175,6 +216,66 @@ fn exe_anchored(path: PathBuf) -> PathBuf {
         .unwrap_or(path)
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Keys from `.env` files that may be forwarded to the Node sidecar.
+///
+/// The child also inherits the process environment; this allowlist only
+/// gates values loaded from disk so a planted `.env` cannot inject
+/// interpreters (`NODE_OPTIONS`, `LD_PRELOAD`, `OPENSSL_CONF`, …).
+fn is_sidecar_env_key(key: &str) -> bool {
+    const DENIED_PREFIXES: &[&str] = &[
+        "NODE_",
+        "LD_",
+        "DYLD_",
+        "OPENSSL_",
+        "PYTHON",
+        "PERL5",
+        "RUBYOPT",
+        "BASH_ENV",
+        "GIT_",
+        "SSH_",
+        "SSLKEYLOGFILE",
+    ];
+    if key != "NODE_ENV" && DENIED_PREFIXES.iter().any(|p| key.starts_with(p)) {
+        return false;
+    }
+
+    const ALLOWED: &[&str] = &[
+        "ORIGIN",
+        "PORT",
+        "HOST",
+        "NODE_ENV",
+        "PUBLIC_APP_PLATFORM",
+        "PUBLIC_TWITCH_CLIENT_ID",
+        "PUBLIC_TWITCH_ONLY",
+        "PUBLIC_YOUTUBE_CLIENT_ID",
+        "YOUTUBE_CLIENT_SECRET",
+        "ASTRO_NODE_AUTOSTART",
+        "ASTRO_NODE_LOGGING",
+        "DEBUG",
+        "TRACE_DEPRECATION",
+        "NO_DEPRECATION",
+        "SERVER_CERT_PATH",
+        "SERVER_KEY_PATH",
+        "MIXCHAT_SONG_QUEUE_DIR",
+        "MIXCHAT_WHEEL_DIR",
+        "MIXCHAT_STREAM_TOOLS_DIR",
+    ];
+    if ALLOWED.contains(&key) {
+        return true;
+    }
+    // YouTube InnerTube tuning and other shell-owned runtime knobs.
+    key.starts_with("YT_")
+}
+
 fn load_first_env_file(candidates: &[Option<PathBuf>]) -> HashMap<String, String> {
     for candidate in candidates.iter().flatten() {
         if !candidate.is_file() {
@@ -187,4 +288,45 @@ fn load_first_env_file(candidates: &[Option<PathBuf>]) -> HashMap<String, String
         return iter.filter_map(Result::ok).collect();
     }
     HashMap::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowlist_accepts_server_keys() {
+        assert!(is_sidecar_env_key("ORIGIN"));
+        assert!(is_sidecar_env_key("YT_DEBUG"));
+        assert!(is_sidecar_env_key("YT_POTOKEN"));
+        assert!(is_sidecar_env_key("NODE_ENV"));
+        assert!(is_sidecar_env_key("MIXCHAT_SONG_QUEUE_DIR"));
+        assert!(is_sidecar_env_key("PUBLIC_YOUTUBE_CLIENT_ID"));
+        assert!(is_sidecar_env_key("YOUTUBE_CLIENT_SECRET"));
+    }
+
+    #[test]
+    fn allowlist_rejects_code_execution_keys() {
+        assert!(!is_sidecar_env_key("NODE_OPTIONS"));
+        assert!(!is_sidecar_env_key("NODE_REPL_EXTERNAL_MODULE"));
+        assert!(!is_sidecar_env_key("LD_PRELOAD"));
+        assert!(!is_sidecar_env_key("LD_LIBRARY_PATH"));
+        assert!(!is_sidecar_env_key("DYLD_INSERT_LIBRARIES"));
+        assert!(!is_sidecar_env_key("OPENSSL_CONF"));
+        assert!(!is_sidecar_env_key("BASH_ENV"));
+        assert!(!is_sidecar_env_key("PYTHONSTARTUP"));
+        assert!(!is_sidecar_env_key("SSLKEYLOGFILE"));
+        assert!(!is_sidecar_env_key("RANDOM_EVIL_KEY"));
+    }
+
+    #[test]
+    fn loopback_detection() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("localhost"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("127.5.5.5"));
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("192.168.1.10"));
+        assert!(!is_loopback_host("example.com"));
+    }
 }

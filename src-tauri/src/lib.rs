@@ -26,8 +26,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .menu(|app| menu::build(app))
-        .on_menu_event(|app, event| menu::handle(app, event))
+        .menu(menu::build)
+        .on_menu_event(menu::handle)
         .setup(|app| {
             app.handle().set_theme(Some(tauri::Theme::Dark));
             let handle = app.handle().clone();
@@ -36,7 +36,8 @@ pub fn run() {
 
             logger.info(format!(
                 "mixchat-desktop starting mode={:?} url={}",
-                app_config.mode, app_config.url
+                app_config.mode,
+                redact_url(&app_config.url)
             ));
 
             let state = Arc::new(ServerState::new(
@@ -155,7 +156,7 @@ fn open_twitch_child<R: tauri::Runtime>(
     if reload_main_on_close {
         if let Some(main) = main_window {
             let main = main.clone();
-            let _ = window.on_window_event(move |event| {
+            window.on_window_event(move |event| {
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     let _ = main.reload();
                 }
@@ -184,6 +185,18 @@ pub(crate) fn open_twitch_activation<R: tauri::Runtime>(
     url: tauri::Url,
 ) -> tauri::Result<()> {
     open_twitch_child(app, "twitch-activate", "Authorize Twitch", url, false)
+}
+
+/// Hand a non-app URL to the system handler. Only `http`/`https`/`mailto`
+/// are allowed: the opener plugin's Rust-side methods do not enforce the
+/// plugin URL scope, so page-driven navigation must be filtered here or it
+/// could trigger `smb://`, `file://`, or other custom schemes.
+fn open_external_url<R: tauri::Runtime>(app: &AppHandle<R>, url: &tauri::Url) {
+    if matches!(url.scheme(), "http" | "https" | "mailto") {
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    } else {
+        eprintln!("[nav] blocked non-http(s)/mailto URL: {}", url.scheme());
+    }
 }
 
 fn twitch_activation_target(target: &tauri::Url) -> Option<tauri::Url> {
@@ -227,7 +240,12 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
 
     let navigation_app = app.clone();
     let new_window_app = app.clone();
-    let app_host = url.host_str().map(|host| host.to_string());
+    // Exact origin (scheme + host + port), matching the old Electron
+    // allowlist. Host-only comparison would also admit http:// when the app
+    // is on https://, and any-port loopback would admit unrelated local
+    // services (port scanners, printers, dev servers).
+    let app_origin = url.origin().ascii_serialization();
+    let new_window_origin = app_origin.clone();
 
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title("Mixchat")
@@ -236,48 +254,36 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
         .min_inner_size(900.0, 600.0)
         .initialization_script("window.__MIXCHAT_SHELL__ = 'tauri';")
         .on_navigation(move |target| {
-            let is_local = matches!(
-                target.host_str(),
-                Some("localhost") | Some("127.0.0.1") | Some("::1")
-            );
-            let is_app_host = app_host.as_deref() == target.host_str();
-            if is_local || is_app_host {
+            let is_app_origin = target.origin().ascii_serialization() == app_origin;
+            if is_app_origin {
                 if target.path() == "/desktop/twitch-login" {
                     let _ = open_twitch_login(&navigation_app);
                     return false;
                 }
-                if let Some(activation) = twitch_activation_target(&target) {
+                if let Some(activation) = twitch_activation_target(target) {
                     let _ = open_twitch_activation(&navigation_app, activation);
                     return false;
                 }
                 return true;
             }
-            let _ = navigation_app.opener().open_url(target.as_str(), None::<&str>);
+            open_external_url(&navigation_app, target);
             false
         })
         .on_new_window(move |target, _features| {
-            let is_twitch_login = target.path() == "/desktop/twitch-login"
-                && matches!(
-                    target.host_str(),
-                    Some("localhost") | Some("127.0.0.1") | Some("::1")
-                );
+            let is_app_origin = target.origin().ascii_serialization() == new_window_origin;
+            let is_twitch_login =
+                is_app_origin && target.path() == "/desktop/twitch-login";
             if is_twitch_login {
                 let _ = open_twitch_login(&new_window_app);
                 return NewWindowResponse::Deny;
             }
-            let is_local_target = matches!(
-                target.host_str(),
-                Some("localhost") | Some("127.0.0.1") | Some("::1")
-            );
-            if is_local_target {
+            if is_app_origin {
                 if let Some(activation) = twitch_activation_target(&target) {
                     let _ = open_twitch_activation(&new_window_app, activation);
                     return NewWindowResponse::Deny;
                 }
             }
-            let _ = new_window_app
-                .opener()
-                .open_url(target.as_str(), None::<&str>);
+            open_external_url(&new_window_app, &target);
             NewWindowResponse::Deny
         })
         .build()?;
@@ -285,6 +291,20 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
 
     let _ = window.set_focus();
     Ok(())
+}
+
+/// Strip `user:password@` from a URL before it is logged.
+fn redact_url(url: &str) -> String {
+    match url.parse::<tauri::Url>() {
+        Ok(mut parsed) => {
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                let _ = parsed.set_username("");
+                let _ = parsed.set_password(None);
+            }
+            parsed.to_string()
+        }
+        Err(_) => url.to_string(),
+    }
 }
 
 fn show_error(app: &AppHandle, logger: &Logger, message: &str) {
