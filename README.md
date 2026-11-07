@@ -198,8 +198,7 @@ Windows job object prevents orphan processes.
 
 ## Linux
 
-Linux is not a target for this shell. Use the hosted Mixchat site if you need
-Linux support.
+*Work in progress
 
 ## License
 
