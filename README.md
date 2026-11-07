@@ -1,10 +1,11 @@
 # MixchatDesktop
 
-Tauri 2 desktop shell for [Mixchat](../Mixchat) on Windows. It runs Mixchat's
+Tauri 2 desktop shell for Mixchat on Windows. It runs Mixchat's
 Astro Node server as a bundled sidecar and opens the UI in the system WebView2
 runtime.
 
-The Mixchat source is consumed as a sibling checkout and is not forked here.
+The Mixchat source is consumed as a sibling checkout (`../Mixchat`) and is not
+forked here.
 
 ## Requirements
 
@@ -167,12 +168,12 @@ The shell reads these `MIXCHAT_*` keys.
 | `MIXCHAT_URL` | Origin the window loads (default `http://localhost:<port>`) |
 | `MIXCHAT_DIR` | Mixchat checkout if not `../Mixchat` |
 | `MIXCHAT_CONFIG` | Explicit desktop `.env` file |
-| `MIXCHAT_ENV_FILE` | Runtime `.env` passed to the server |
 | `MIXCHAT_MODE` | `dev`, `local`, or `packaged` (normally inferred) |
 
-A `.env` file can live in the repository, the app data directory, the app config
-directory, or next to the executable. Process environment variables win over
-file values.
+A `.env` file can live in the app data directory, the app config
+directory, or next to the executable (in development builds, also the
+repository root and current directory). Process environment variables win over
+file values. Only known-safe keys are forwarded to the spawned server.
 
 ## OAuth
 
