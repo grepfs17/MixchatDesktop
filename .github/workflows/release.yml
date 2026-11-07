@@ -107,11 +107,25 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Upload artifacts
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: mixchat-windows-x64
-          path: dist/*
+          name: mixchat-setup
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+      - name: Upload portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixchat-portable
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: dist/SHA256SUMS.txt
           if-no-files-found: error
 
   release:
@@ -120,10 +134,22 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download installer
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-windows-x64
+          name: mixchat-setup
+          path: dist
+
+      - name: Download portable
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-portable
+          path: dist
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums
           path: dist
 
       - name: Create GitHub release
