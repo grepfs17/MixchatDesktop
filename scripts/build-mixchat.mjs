@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnvFile } from "./env.mjs";
 import { runSecretCheck } from "./check-secrets.mjs";
+import { runPnpm } from "./pnpm.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -42,11 +42,7 @@ if (desktopMode) {
   );
 }
 
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-const res = spawnSync(pnpm, ["--dir", mixchatRoot, "build"], {
-  stdio: "inherit",
-  env,
-});
+const res = runPnpm(["--dir", mixchatRoot, "build"], { env });
 if ((res.status ?? 1) !== 0) process.exit(res.status ?? 1);
 
 // Refuse to continue if confidential secrets (the hosted site's Twitch/Google

@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnvFile } from "./env.mjs";
 import { runSecretCheck } from "./check-secrets.mjs";
+import { runPnpm } from "./pnpm.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -130,9 +130,7 @@ async function ensureJsdom() {
   );
   await cp(lockFile, path.join(destination, "pnpm-lock.yaml"));
 
-  const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const result = spawnSync(
-    pnpm,
+  const result = runPnpm(
     [
       "install",
       "--prod",
@@ -140,7 +138,7 @@ async function ensureJsdom() {
       "--ignore-scripts",
       "--frozen-lockfile",
     ],
-    { cwd: destination, stdio: "inherit" },
+    { cwd: destination },
   );
   if ((result.status ?? 1) !== 0) {
     throw new Error(

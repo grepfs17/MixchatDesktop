@@ -2,12 +2,19 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { runPnpm } from "./pnpm.mjs";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const tauriCli = path.join(
+  projectRoot,
+  "node_modules",
+  "@tauri-apps",
+  "cli",
+  "tauri.js",
+);
 
 // `pnpm tauri:prepare` runs once below; the inline config override nulls out
 // beforeBuildCommand so each `tauri build` does not rebuild the Mixchat
@@ -15,21 +22,27 @@ const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const skipPrepare = JSON.stringify({ build: { beforeBuildCommand: null } });
 
 function run(command, args) {
-  console.log(`[release] $ ${command} ${args.join(" ")}`);
+  console.log(`[release] $ ${path.basename(command)} ${args.join(" ")}`);
   const result = spawnSync(command, args, {
     cwd: projectRoot,
     stdio: "inherit",
   });
+  if (result.error) {
+    console.error(`[release] failed to start: ${result.error.message}`);
+  }
   if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
 }
 
-run(pnpm, ["tauri:prepare"]);
+console.log("[release] $ pnpm tauri:prepare");
+const prepare = runPnpm(["tauri:prepare"], { cwd: projectRoot });
+if ((prepare.status ?? 1) !== 0) process.exit(prepare.status ?? 1);
 
-run(pnpm, ["exec", "tauri", "build", "--config", skipPrepare]);
+// The Tauri CLI is invoked through its JS entry directly: `pnpm exec` would
+// need a shell on Windows, and cmd.exe would mangle the quoted JSON config.
+run(process.execPath, [tauriCli, "build", "--config", skipPrepare]);
 
-run(pnpm, [
-  "exec",
-  "tauri",
+run(process.execPath, [
+  tauriCli,
   "build",
   "--no-bundle",
   "--config",
