@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEnvFile } from "../src/main/mixchat-server.mjs";
+import { parseEnvFile } from "./env.mjs";
 import { runSecretCheck } from "./check-secrets.mjs";
 
 const projectRoot = path.resolve(
@@ -14,8 +14,10 @@ const mixchatRoot = process.env.MIXCHAT_DIR
   : path.resolve(projectRoot, "..", "Mixchat");
 
 // Desktop build profile. When present, the Mixchat bundle is built in
-// "desktop" mode: public-client OAuth (Twitch Device Code, Google PKCE) and
-// NO client secrets baked in. See .env.desktop.example.
+// "desktop" mode: public-client OAuth (Twitch Device Code, Google PKCE).
+// The hosted site's confidential web secrets are stripped; Google's
+// non-confidential Desktop-app client secret is kept when provided.
+// See .env.desktop.example.
 const desktopEnvFile = path.join(projectRoot, ".env.desktop");
 const desktopMode = existsSync(desktopEnvFile);
 
@@ -40,7 +42,8 @@ if (desktopMode) {
   );
 }
 
-const res = spawnSync("pnpm", ["--dir", mixchatRoot, "build"], {
+const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+const res = spawnSync(pnpm, ["--dir", mixchatRoot, "build"], {
   stdio: "inherit",
   env,
 });

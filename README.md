@@ -1,229 +1,208 @@
 # MixchatDesktop
 
-Electron desktop shell for [Mixchat](../Mixchat). It runs Mixchat's Astro Node
-server locally in the background and opens the UI in a native window, so you get
-the full app (Twitch + YouTube chat, emotes, moderation, song queue, HLS) without
-a browser.
+Tauri 2 desktop shell for Mixchat on Windows. It runs Mixchat's
+Astro Node server as a bundled sidecar and opens the UI in the system WebView2
+runtime.
 
-The Mixchat source is not modified — this project consumes its build output and
-adds the desktop wrapper.
+The [Mixchat](https://github.com/grepfs17/Mixchat) source is consumed as a
+sibling checkout (`../Mixchat`) and is not forked here.
 
 ## Requirements
 
+- Windows 10 or 11
 - Node.js LTS and pnpm
-- The Mixchat checkout as a sibling directory: `../Mixchat`
-- Linux only: a working Chromium sandbox or `MIXCHAT_NO_SANDBOX=1` (see below)
+- Rust toolchain (`rustup`, `cargo`)
+- The [Mixchat](https://github.com/grepfs17/Mixchat) checkout at `../Mixchat`
+- A `.env.desktop` profile with OAuth client IDs
+
+The NSIS installer embeds the WebView2 bootstrapper, so a fresh machine can
+install the runtime during setup.
 
 ## Setup
 
+Clone Mixchat next to this repo and install its dependencies once:
+
 ```bash
+git clone https://github.com/grepfs17/Mixchat.git ../Mixchat
+# inside ../Mixchat
 pnpm install
 ```
 
-Build the Mixchat server bundle once (also patches it for cross-platform use):
+Then prepare this shell:
 
 ```bash
-pnpm server:build     # builds Mixchat + prepares the bundle
+# inside this repo
+pnpm install
+cp .env.desktop.example .env.desktop
 ```
 
-By default (`../Mixchat/.env`) the build bakes the OAuth client secrets into the
-app. To build a **no-secret** app instead, create a `.env.desktop` profile (see
-`.env.desktop.example`) with a Public Twitch app and a Google "Desktop app"
-OAuth client. When `.env.desktop` is present, `pnpm server:build` builds in
-desktop mode: Twitch uses the Device Code Grant (no secret) and Google uses
-PKCE with its Desktop-app client secret.
+Fill in `.env.desktop`:
 
-Or, if `../Mixchat/dist` already exists, just run:
+- `PUBLIC_TWITCH_CLIENT_ID`: Twitch app with Client Type = Public.
+- `PUBLIC_YOUTUBE_CLIENT_ID`: Google OAuth client of type Desktop app.
+- `YOUTUBE_CLIENT_SECRET`: the Desktop-app client secret. Google requires it
+  even for PKCE desktop clients and treats it as non-confidential.
+
+The redirect URIs must stay on `http://localhost:3000/auth/...` unless you also
+rebuild Mixchat with matching values.
+
+Then build the local server bundle and fetch the Node sidecar:
 
 ```bash
-pnpm prepare:server
+pnpm tauri:prepare
 ```
 
 ## Development
 
-Start Mixchat's dev server in a separate terminal, then attach:
+Run Mixchat's dev server in a separate terminal:
 
 ```bash
-# terminal 1 (in ../Mixchat)
-pnpm dev
-
-# terminal 2 (here)
+# terminal 1, inside ../Mixchat
 pnpm dev
 ```
 
-`pnpm start` runs against the locally built bundle instead (no dev server).
-
-## Configuration
-
-Copy `.env.example` to `.env`. The desktop app reads `MIXCHAT_*` keys for its own
-behavior and forwards the rest (`ORIGIN`, `YT_*`, storage paths) to the spawned
-server.
-
-Notable keys:
-
-| Key | Purpose |
-|-----|---------|
-| `MIXCHAT_PORT` | Local server port (default `3000`; must match the OAuth redirect URIs) |
-| `MIXCHAT_HOST` | Server listen address (default `127.0.0.1`) |
-| `MIXCHAT_URL` | Origin the window loads (default `http://localhost:<port>`); **must** match the OAuth redirect URI host |
-| `MIXCHAT_DIR` | Path to the Mixchat checkout if not `../Mixchat` |
-| `MIXCHAT_ENV_FILE` | Explicit Mixchat runtime `.env` to load |
-| `MIXCHAT_NO_SANDBOX` | Set to `1` on Linux to pass `--no-sandbox` to Electron |
-
-OAuth client IDs, secrets and redirect URIs are **baked into the server bundle at
-build time** from `../Mixchat/.env`, so they are not needed at runtime.
-
-## Packaging
+Then start the shell against it:
 
 ```bash
-pnpm dist             # build all release artifacts (Linux + Windows) and clean
-pnpm build            # full installers for the host OS
-pnpm release          # build for the host OS and publish to GitHub Releases
-pnpm run pack         # unpacked app in release/<platform>-unpacked
-pnpm pack:win         # Windows unpacked + portable zip (cross-build with Wine)
-pnpm clean            # remove everything in release/ except the final artifacts
+# terminal 2, inside this repo
+pnpm dev
 ```
 
-> Use `pnpm run pack` (not `pnpm pack`, which is pnpm's own tarball command).
+`pnpm dev` uses Tauri dev mode and waits for the external server at
+`http://localhost:3000`.
 
-`pnpm dist` leaves the shippable artifacts in `release/`:
-
-- **Linux**: `mixchat-desktop_<version>_amd64.deb` and `Mixchat-<version>.AppImage`
-- **Windows**: `Mixchat Setup <version>.exe` (NSIS installer) and
-  `Mixchat-<version>-win-x64-portable.zip` (unpacked, no install; includes
-  `.env.example`)
-
-`scripts/clean-release.mjs` then deletes intermediates (`*-unpacked/`,
-`builder-debug.yml`) and stale versions, keeping the artifacts above plus the
-update feed files (`latest*.yml`, `*.blockmap`) that electron-updater needs.
-Cross-building Windows targets from Linux requires Wine (`sudo apt install
-wine64`).
-
-`electron-builder.yml` packages the patched bundle from `build/mixchat/dist`.
-Re-run `pnpm prepare:server` (or `pnpm server:build`) whenever Mixchat's `dist`
-changes, before packaging.
-
-## Auto-update
-
-Packaged builds check for updates on launch using **electron-updater** against
-this repository's GitHub Releases (`publish` in `electron-builder.yml`). When a
-newer version exists the user is asked before downloading, then asked before
-restarting to install. A **Help → Check for Updates…** menu item triggers a
-manual check. Update failures are logged, never fatal.
-
-To publish a release:
+To run against the locally prepared bundle instead:
 
 ```bash
-GH_TOKEN=<personal access token with repo scope> pnpm release
+pnpm start
 ```
 
-This builds the host OS's artifacts (including `latest*.yml` + `*.blockmap`),
-creates/updates the GitHub release and uploads them. Because the app itself
-embeds an OAuth client secret, **always publish an update when rotating it** —
-`electron-builder.yml` guarantees the metadata is shipped so existing installs
-can pick it up.
+`pnpm start` runs the shell in local mode and spawns the bundled sidecar.
 
-- Supported: **AppImage** (Linux) and **NSIS** (Windows).
-- Not supported by electron-updater: the `.deb` package and the portable ZIP —
-  those users must reinstall manually.
-- Updates are code-signature verified where the platform provides it, which is
-  why signing (below) matters.
-
-## Code signing
-
-Binaries are unsigned by default. To sign, provide credentials via the
-environment — no secrets are stored in the repo.
-
-**Windows (NSIS)** — set:
+## Build the Windows installer
 
 ```bash
-CSC_LINK=/path/to/cert.pfx        # or a base64 of the .pfx
-CSC_KEY_PASSWORD=<password>
+pnpm tauri:prepare
+pnpm tauri:build
 ```
 
-An EV/OV code-signing certificate avoids the SmartScreen warning. Linux builds
-(AppImage/deb) carry no signature.
+The NSIS installer is written under
+`src-tauri/target/release/bundle/nsis/`.
+
+`tauri:prepare` runs these steps:
+
+1. Builds Mixchat with `PUBLIC_APP_PLATFORM=desktop`.
+2. Prepares and path-patches the standalone server bundle.
+3. Copies the bundle to `src-tauri/resources/mixchat`.
+4. Installs `jsdom` next to the bundle. It cannot be bundled into the ESM server,
+   so it remains the only runtime package resolved from `node_modules`.
+5. Downloads the Node binary for the target triple into `src-tauri/binaries`.
+
+The secret guard runs before packaging and refuses to embed confidential values
+from the hosted site. See [SECURITY.md](./SECURITY.md).
+
+## Portable Windows build
+
+```bash
+pnpm tauri:build:portable
+```
+
+This builds without an installer, applies `src-tauri/tauri.portable.conf.json`,
+and produces a zip at
+`src-tauri/target/portable/Mixchat-<version>-win-x64-portable.zip`.
+
+Extract the zip and run `Mixchat.exe`. Settings, sessions, chat history, logs,
+and WebView data live in the `app-data` folder next to the executable. The
+portable build does not write to AppData or the registry, so it can run from a
+USB stick or a user folder.
+
+`pnpm tauri:portable` rebuilds the zip from an existing release build. Do not
+run the portable and installed builds at the same time because both use
+`http://localhost:3000`.
+
+The portable zip does not include the WebView2 bootstrapper. Windows 11 and
+current Windows 10 installs already have the Evergreen WebView2 Runtime. If it
+is missing, install it from Microsoft before running `Mixchat.exe`.
+
+### Cross-building the Windows portable from Linux
+
+Requires Docker and network access. This produces the same `win-x64` portable
+zip using `cargo-xwin`:
+
+```bash
+pnpm tauri:build:portable:win
+```
+
+The Windows SDK, Rust toolchain, and cargo registry are cached in
+`~/.cache/mixchat-tauri`. The GUI still needs WebView2, so run the extracted app
+on Windows.
 
 ## How it works
 
-- `src/main/index.mjs` spawns `build/mixchat/dist/server/entry.mjs` using
-  Electron's bundled Node (`ELECTRON_RUN_AS_NODE`), waits for the port, then loads
-  the UI.
-- The window loads `http://localhost:<port>` (matching Mixchat's OAuth redirect
-  URIs) while the server binds `127.0.0.1`. The origins must match or the
-  host-scoped `oauth_state` cookie is not sent back and login fails with
-  "Invalid state parameter".
-- OAuth popups (Twitch/Google/YouTube) open in-app so `window.opener` callbacks
-  work; other external links open in the system browser.
-- Packaged builds run the server with `cwd` set to the app's `userData` dir so
-  session/data writes land somewhere writable, and set
-  `MIXCHAT_SONG_QUEUE_DIR` / `MIXCHAT_WHEEL_DIR` there.
-- `scripts/prepare-mixchat.mjs` copies `../Mixchat/dist` and rewrites the
-  absolute build-machine paths Astro bakes into `entry.mjs` (client/server dirs
-  and session storage) into portable values. Without this, the same bundle fails
-  on a different OS (`fileURLToPath` rejects `file:///home/...` on Windows).
+- `src-tauri/src/server.rs` spawns the Node sidecar, waits for
+  `/api/parent-domain`, logs stdout and stderr, restarts crashes with backoff,
+  and kills the process on exit.
+- The window loads `MIXCHAT_URL` (default `http://localhost:3000`). Keep the
+  host and port aligned with the OAuth redirect URIs.
+- Server data lives under the Tauri app data directory. Logs live under the app
+  log directory and are available from **Server > Open logs**.
+- The shell sets `window.__MIXCHAT_SHELL__ = 'tauri'` so the shared Mixchat
+  bundle can select the desktop auth flow.
+- Google sign-in opens in the system browser because Google blocks embedded
+  webviews. The server stores the token exchange in a short-lived handoff
+  record, and the app polls for it. The poll response sets the auth cookies in
+  the app's own cookie jar.
+- OAuth and Twitch activation URLs are opened with `POST /api/desktop/open` on
+  the local server. The webview never navigates for those links, which avoids
+  the WebView2 reload.
+- The window loads `?mixchat-shell=tauri` so the shared bundle selects the
+  desktop auth flow even when webview initialization scripts are skipped.
 
-## OAuth & secrets
+## Configuration
 
-Two operating modes, chosen by whether `.env.desktop` exists at build time:
+The shell reads these `MIXCHAT_*` keys.
 
-| | Web mode (default) | Desktop mode (`.env.desktop`) |
+| Key | Purpose |
+|-----|---------|
+| `MIXCHAT_PORT` | Local server port (default `3000`, must match OAuth redirects) |
+| `MIXCHAT_HOST` | Server listen address (default `127.0.0.1`) |
+| `MIXCHAT_URL` | Origin the window loads (default `http://localhost:<port>`) |
+| `MIXCHAT_DIR` | Mixchat checkout if not `../Mixchat` |
+| `MIXCHAT_CONFIG` | Explicit desktop `.env` file |
+| `MIXCHAT_MODE` | `dev`, `local`, or `packaged` (normally inferred) |
+
+A `.env` file can live in the app data directory, the app config
+directory, or next to the executable (in development builds, also the
+repository root and current directory). Process environment variables win over
+file values. Only known-safe keys are forwarded to the spawned server.
+
+## OAuth
+
+| Provider | Flow | Secret in binary |
 |---|---|---|
-| Twitch login | Auth code popup (Confidential app) | Device Code Grant (Public app) |
-| Google login | OAuth popup (Web client + secret) | PKCE + Desktop app client |
-| Secrets in app | baked into `dist/server` | Twitch: **none**; Google: desktop client secret (non-confidential) |
+| Twitch | Device Code Grant, public client | None |
+| Google/YouTube | PKCE Desktop-app client, system-browser handoff | Desktop-app client secret (non-confidential) |
 
-Desktop mode requires:
-- A Twitch app with **Client Type = Public** → `PUBLIC_TWITCH_CLIENT_ID`.
-- A Google **"Desktop app"** OAuth client with the loopback redirect
-  `http://localhost:3000/auth/youtube/callback` → `PUBLIC_YOUTUBE_CLIENT_ID` +
-  `YOUTUBE_CLIENT_SECRET` (Google rejects PKCE without the secret).
+The hosted website's Twitch and Google web client secrets are never embedded.
+The build guard fails if they appear.
 
-Twitch is fully secretless via the Device Code Grant. Google does not offer a
-secretless flow, so its Desktop-app client secret is embedded (Google treats
-desktop-app secrets as non-confidential).
+Twitch sign-in opens the device activation page in an in-app webview. That
+single login also stores Twitch's cookies in the shared WebView2 profile, so the
+embedded player is signed in with the same account. **Account > Log in to
+Twitch player** remains only as a fallback if the player cookies are missing.
 
-These are separate from the hosted website's confidential Twitch app / Web
-Google client; the website is unaffected. The desktop window must load
-`http://localhost:3000` so cookies match the redirect host.
+## Logs and recovery
 
-## Security & shipping
+The **Server** menu can restart the server or open the current log file. If the
+server exits unexpectedly, the shell restarts it up to five times with backoff
+(1, 2, 4, 8, then 16 seconds). Graceful shutdown kills the sidecar, and the
+Windows job object prevents orphan processes.
 
-Distributed desktop binaries are fully readable by end users, so anything baked
-into the build must be treated as public. Desktop builds ship only public
-client IDs plus the Google **Desktop-app** client secret, which Google classes
-as non-confidential. Twitch ships no secret (Device Code Grant), and the
-hosted-site secrets / YouTube proxy token are never embedded.
+## Linux
 
-A build guard enforces this: `scripts/check-secrets.mjs` scans the compiled
-bundle and **fails the build** if a confidential value (web Twitch/Google
-secret, proxy token) appears — including the case where `.env.desktop` is
-missing and the build silently falls back to web mode. It runs at the end of
-`pnpm server:build` / `pnpm prepare:server`, or on demand:
+*Work in progress
 
-```bash
-pnpm check:secrets
-```
+## License
 
-See [SECURITY.md](./SECURITY.md) for the full threat model, why the Google
-desktop secret is safe to embed, and how to isolate the OAuth client (dedicated
-Google Cloud project, quotas and abuse alerts).
-
-## Linux sandbox note
-
-On distros that restrict unprivileged user namespaces (e.g. Ubuntu 24.04),
-Electron aborts with a `SUID sandbox` error. Either run
-`MIXCHAT_NO_SANDBOX=1 pnpm dev`, or fix the helper:
-
-```bash
-sudo chown root:root node_modules/.pnpm/electron@*/node_modules/electron/dist/chrome-sandbox
-sudo chmod 4755 node_modules/.pnpm/electron@*/node_modules/electron/dist/chrome-sandbox
-```
-
-## Notes
-
-- The app icon is generated from Mixchat's `public/favicon.png` (see
-  `build/icon.png`). Unsigned builds make Windows SmartScreen warn — see
-  [Code signing](#code-signing).
-
-Licensed under AGPL-3.0 (see [LICENSE](./LICENSE)), same as Mixchat.
+Licensed under AGPL-3.0, same as [Mixchat](https://github.com/grepfs17/Mixchat).
+See [LICENSE](./LICENSE).

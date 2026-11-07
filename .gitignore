@@ -1,7 +1,10 @@
 node_modules/
-release/
-dist/
 build/mixchat/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/
+src-tauri/binaries/
+src-tauri/.cache/
 .env
 .env.desktop
 *.log

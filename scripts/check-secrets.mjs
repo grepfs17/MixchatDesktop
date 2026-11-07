@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseEnvFile } from "../src/main/mixchat-server.mjs";
+import { parseEnvFile } from "./env.mjs";
 
 /**
  * Build guard: fail the desktop build if any *confidential* secret (the hosted
@@ -16,22 +16,41 @@ import { parseEnvFile } from "../src/main/mixchat-server.mjs";
  * value provided by `.env.desktop`.
  */
 
-const SENSITIVE_SUFFIXES = ["_SECRET", "_TOKEN", "_COOKIE", "_POTOKEN"];
-const MIN_SECRET_LEN = 8;
+const SENSITIVE_SUFFIXES = [
+  "_SECRET",
+  "_TOKEN",
+  "_COOKIE",
+  "_POTOKEN",
+  "_PASSWORD",
+  "_API_KEY",
+  "_PRIVATE_KEY",
+  "_CREDENTIALS",
+];
+const MIN_SECRET_LEN = 6;
 const GOOGLE_SECRET_RE = /GOCSPX-[A-Za-z0-9_-]{10,}/g;
+/** `scheme://user:pass@host` — credentials embedded in a URL value. */
+const URL_CREDENTIALS_RE = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i;
 
 /** A key is treated as sensitive unless it is explicitly public. */
 export function isSensitiveKey(key) {
   if (!key || key.startsWith("PUBLIC_")) return false;
-  return SENSITIVE_SUFFIXES.some((suffix) => key.endsWith(suffix));
+  if (SENSITIVE_SUFFIXES.some((suffix) => key.endsWith(suffix))) return true;
+  // Heuristic: any non-public key whose *value* looks like a credentialed URL.
+  return false;
+}
+
+/** True when a value itself embeds credentials (e.g. DATABASE_URL). */
+export function isSensitiveValue(value) {
+  return typeof value === "string" && URL_CREDENTIALS_RE.test(value);
 }
 
 /** Map of secretValue -> sourceKey for every sensitive entry in an env object. */
 function sensitiveValues(env) {
   const out = new Map();
   for (const [key, value] of Object.entries(env ?? {})) {
-    if (!isSensitiveKey(key)) continue;
     if (typeof value !== "string" || value.length < MIN_SECRET_LEN) continue;
+    if (!isSensitiveKey(key) && !isSensitiveValue(value)) continue;
+    if (key.startsWith("PUBLIC_")) continue;
     if (!out.has(value)) out.set(value, key);
   }
   return out;
@@ -106,7 +125,14 @@ export async function runSecretCheck({
   projectRoot,
   allowGoogleSecrets = [],
   logger = console,
+  // Set true only for ad-hoc runs where no bundle exists yet; packaging
+  // paths must keep the default so a missing dist fails the build instead
+  // of silently skipping the guard.
+  allowMissingDist = false,
 }) {
+  // MIXCHAT_WEB_ENV_FILE overrides the web `.env` source used to discover
+  // forbidden values. Pointing it at an empty file disables value discovery
+  // (only the Google-secret regex remains) — do not set this in CI.
   const webEnvFile =
     process.env.MIXCHAT_WEB_ENV_FILE || path.join(mixchatRoot, ".env");
   const desktopEnvFile = path.join(projectRoot, ".env.desktop");
@@ -138,8 +164,14 @@ export async function runSecretCheck({
   }
 
   if (!existsSync(distDir)) {
-    logger.warn(`[check-secrets] dist not found, skipping: ${distDir}`);
-    return { ok: true, scanned: 0 };
+    if (allowMissingDist) {
+      logger.warn(`[check-secrets] dist not found, skipping: ${distDir}`);
+      return { ok: true, scanned: 0 };
+    }
+    logger.error(
+      `[check-secrets] FAILED: dist not found at ${distDir}. Refusing to skip the secret guard — run the Mixchat build first, or pass allowMissingDist for ad-hoc checks.`,
+    );
+    return { ok: false, scanned: 0 };
   }
 
   const { ok, hits, strayGoogleSecrets, scanned } = await scanForSecrets(
@@ -188,7 +220,14 @@ async function main() {
       ? preparedDist
       : sourceDist;
 
-  const { ok } = await runSecretCheck({ distDir, mixchatRoot, projectRoot });
+  const { ok } = await runSecretCheck({
+    distDir,
+    mixchatRoot,
+    projectRoot,
+    // CLI runs are ad-hoc: a missing dist is a warning here, not a failure.
+    // Packaging chains (build-mixchat / prepare-mixchat) keep the hard fail.
+    allowMissingDist: true,
+  });
   process.exit(ok ? 0 : 1);
 }
 
