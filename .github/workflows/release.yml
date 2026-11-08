@@ -1,11 +1,12 @@
 # Builds the Windows x64 release artifacts (NSIS installer + portable zip)
-# on every run; publishes them to a GitHub Release when a v* tag is pushed.
+# on every run; publishes them to a GitHub Release when a version tag is pushed
+# (with or without a leading v).
 
 name: release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "*.*.*"]
   workflow_dispatch:
 
 permissions:
@@ -85,7 +86,7 @@ jobs:
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Guard tag against package.json version
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -137,7 +138,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: windows-x64
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Download installer
@@ -171,6 +172,11 @@ jobs:
             echo
             cat notes.md
           } > body.md
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Mixchat $GITHUB_REF_NAME" \
-            --notes-file body.md
+          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GH_REPO" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GH_REPO" \
+              --title "Mixchat $GITHUB_REF_NAME" \
+              --notes-file body.md
+          fi

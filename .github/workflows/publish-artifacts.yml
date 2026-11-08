@@ -1,0 +1,47 @@
+# Attaches artifacts from an earlier release run to an existing GitHub Release.
+# Use when a release was created without assets (for example the tag did not
+# match the release trigger). Does not rebuild anything.
+
+name: publish-artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach assets to
+        required: true
+        type: string
+      run_id:
+        description: Workflow run ID that built the artifacts
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Attach artifacts to release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$TAG" --repo "$GH_REPO" >/dev/null
+          gh release upload "$TAG" dist/* --repo "$GH_REPO" --clobber
+          gh release view "$TAG" --repo "$GH_REPO" --json assets \
+            --jq '.assets[].name'
