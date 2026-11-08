@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       mixchat_sha: ${{ steps.mixchat.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout MixchatDesktop
         uses: actions/checkout@v4
@@ -78,6 +79,11 @@ jobs:
             echo "YOUTUBE_CLIENT_SECRET=${DESKTOP_YOUTUBE_CLIENT_SECRET}"
           } >> .env.desktop
 
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Guard tag against package.json version
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -110,21 +116,21 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: mixchat-setup
+          name: mixchat-${{ steps.version.outputs.version }}-setup
           path: dist/*-setup.exe
           if-no-files-found: error
 
       - name: Upload portable
         uses: actions/upload-artifact@v4
         with:
-          name: mixchat-portable
+          name: mixchat-${{ steps.version.outputs.version }}-portable
           path: dist/*.zip
           if-no-files-found: error
 
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
-          name: checksums
+          name: mixchat-${{ steps.version.outputs.version }}-checksums
           path: dist/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -137,19 +143,19 @@ jobs:
       - name: Download installer
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-setup
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-setup
           path: dist
 
       - name: Download portable
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-portable
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-portable
           path: dist
 
       - name: Download checksums
         uses: actions/download-artifact@v4
         with:
-          name: checksums
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-checksums
           path: dist
 
       - name: Create GitHub release
