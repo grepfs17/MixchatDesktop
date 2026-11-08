@@ -119,53 +119,68 @@ fn open_twitch_child<R: tauri::Runtime>(
         return Ok(());
     }
 
-    let navigation_app = app.clone();
-    let popup_app = app.clone();
-    let main_window = app.get_webview_window("main");
-    let nav_label = label.to_string();
-    let popup_label = label.to_string();
-    #[cfg(debug_assertions)]
-    eprintln!("[twitch-child] opening {label}");
+    // This runs from Tauri callbacks (navigation, new-window, menu, IPC).
+    // Building a Webview2 window on the event-loop thread deadlocks on Windows,
+    // so create the child on its own thread and let the loop service it.
+    let app = app.clone();
+    let label = label.to_string();
+    let title = title.to_string();
+    std::thread::spawn(move || {
+        let navigation_app = app.clone();
+        let popup_app = app.clone();
+        let main_window = app.get_webview_window("main");
+        let nav_label = label.clone();
+        let popup_label = label.clone();
+        #[cfg(debug_assertions)]
+        eprintln!("[twitch-child] opening {label}");
 
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
-        .title(title)
-        .theme(Some(tauri::Theme::Dark))
-        .inner_size(600.0, 760.0)
-        .min_inner_size(400.0, 500.0)
-        .on_navigation(move |target| {
-            let scheme = target.scheme();
-            if scheme != "http" && scheme != "https" {
-                return false;
-            }
-            if target.host_str() == Some("www.twitch.tv") && target.path() == "/" {
-                if let Some(window) = navigation_app.get_webview_window(&nav_label) {
-                    let _ = window.close();
+        let window = match WebviewWindowBuilder::new(&app, label.as_str(), WebviewUrl::External(url))
+            .title(title)
+            .theme(Some(tauri::Theme::Dark))
+            .inner_size(600.0, 760.0)
+            .min_inner_size(400.0, 500.0)
+            .on_navigation(move |target| {
+                let scheme = target.scheme();
+                if scheme != "http" && scheme != "https" {
+                    return false;
                 }
+                if target.host_str() == Some("www.twitch.tv") && target.path() == "/" {
+                    if let Some(window) = navigation_app.get_webview_window(&nav_label) {
+                        let _ = window.close();
+                    }
+                }
+                true
+            })
+            .on_new_window(move |target, _features| {
+                // Keep Twitch login popups (SSO, verification) in the child
+                // window so they share the same cookie jar.
+                if let Some(window) = popup_app.get_webview_window(&popup_label) {
+                    let _ = window.navigate(target);
+                }
+                NewWindowResponse::Deny
+            })
+            .build()
+        {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("[twitch-child] failed to open {label}: {error}");
+                return;
             }
-            true
-        })
-        .on_new_window(move |target, _features| {
-            // Keep Twitch login popups (SSO, verification) in the child window
-            // so they share the same cookie jar.
-            if let Some(window) = popup_app.get_webview_window(&popup_label) {
-                let _ = window.navigate(target);
-            }
-            NewWindowResponse::Deny
-        })
-        .build()?;
-    let _ = window.set_theme(Some(tauri::Theme::Dark));
+        };
+        let _ = window.set_theme(Some(tauri::Theme::Dark));
 
-    // The player only sees the new cookies after its iframe is recreated.
-    if reload_main_on_close {
-        if let Some(main) = main_window {
-            let main = main.clone();
-            window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::Destroyed) {
-                    let _ = main.reload();
-                }
-            });
+        // The player only sees the new cookies after its iframe is recreated.
+        if reload_main_on_close {
+            if let Some(main) = main_window {
+                let main = main.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        let _ = main.reload();
+                    }
+                });
+            }
         }
-    }
+    });
 
     Ok(())
 }
