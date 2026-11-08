@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main Mixchat window. The window loads the local Mixchat server and makes no Tauri IPC calls, so no core permissions are granted. Child windows (Twitch) are intentionally absent and get zero IPC.",
+  "description": "Main Mixchat window. The window loads the local Mixchat server, so no core or plugin permissions are granted. Child windows (Twitch) are intentionally absent and get zero IPC.",
   "windows": ["main"],
   "permissions": []
 }

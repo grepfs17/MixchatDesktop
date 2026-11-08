@@ -145,7 +145,7 @@ on Windows.
 - The window loads `MIXCHAT_URL` (default `http://localhost:3000`). Keep the
   host and port aligned with the OAuth redirect URIs.
 - Server data lives under the Tauri app data directory. Logs live under the app
-  log directory and are available from **Server > Open logs**.
+  log directory and are available from **Open logs** in the right-click menu.
 - The shell sets `window.__MIXCHAT_SHELL__ = 'tauri'` so the shared Mixchat
   bundle can select the desktop auth flow.
 - Google sign-in opens in the system browser because Google blocks embedded
@@ -193,7 +193,7 @@ Twitch player** remains only as a fallback if the player cookies are missing.
 
 ## Logs and recovery
 
-The **Server** menu can restart the server or open the current log file. If the
+The right-click menu can restart the server or open the current log file. If the
 server exits unexpectedly, the shell restarts it up to five times with backoff
 (1, 2, 4, 8, then 16 seconds). Graceful shutdown kills the sidecar, and the
 Windows job object prevents orphan processes.

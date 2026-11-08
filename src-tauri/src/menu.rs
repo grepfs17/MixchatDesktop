@@ -1,12 +1,21 @@
 use std::sync::Arc;
 
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{
+    ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem,
+};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::server::ServerState;
 
+/// Flat menu shown on right-click. Submenus are inlined because popup menus
+/// render one level at a time.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let copy = PredefinedMenuItem::copy(app, Some("Copy"))?;
+    let cut = PredefinedMenuItem::cut(app, Some("Cut"))?;
+    let paste = PredefinedMenuItem::paste(app, Some("Paste"))?;
+    let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))?;
+
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
     #[cfg(debug_assertions)]
@@ -23,33 +32,32 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         Some("CmdOrCtrl+Shift+T"),
     )?;
 
-    let file = Submenu::new(app, "File", true)?;
-    file.append(&quit)?;
-
-    let view = Submenu::new(app, "View", true)?;
-    view.append(&reload)?;
-    #[cfg(debug_assertions)]
-    view.append(&devtools)?;
-    view.append(&PredefinedMenuItem::separator(app)?)?;
-    view.append(&fullscreen)?;
-
-    let account = Submenu::new(app, "Account", true)?;
-    account.append(&twitch_login)?;
-
-    let server = Submenu::new(app, "Server", true)?;
-    server.append(&restart)?;
-    server.append(&logs)?;
-
     let menu = Menu::new(app)?;
-    menu.append(&file)?;
-    menu.append(&view)?;
-    menu.append(&account)?;
-    menu.append(&server)?;
+    menu.append(&copy)?;
+    menu.append(&cut)?;
+    menu.append(&paste)?;
+    menu.append(&select_all)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&reload)?;
+    #[cfg(debug_assertions)]
+    menu.append(&devtools)?;
+    menu.append(&fullscreen)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&twitch_login)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&restart)?;
+    menu.append(&logs)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&quit)?;
     Ok(menu)
 }
 
 pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    match event.id().as_ref() {
+    handle_id(app, event.id().as_ref());
+}
+
+pub fn handle_id<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    match id {
         "quit" => app.exit(0),
         "reload" => {
             if let Some(window) = app.get_webview_window("main") {
@@ -86,4 +94,19 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         }
         _ => {}
     }
+}
+
+#[tauri::command]
+pub fn show_context_menu(app: AppHandle) -> Result<(), String> {
+    let webview = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    let menu = build(&app).map_err(|error| error.to_string())?;
+    menu.popup(webview.as_ref().window())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn menu_action(app: AppHandle, id: String) {
+    handle_id(&app, &id);
 }
