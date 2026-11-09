@@ -1,6 +1,6 @@
-# Builds the Windows x64 release artifacts (NSIS installer + portable zip)
-# on every run; publishes them to a GitHub Release when a version tag is pushed
-# (with or without a leading v).
+# Builds Windows x64 (NSIS installer + portable zip) and Linux x64 (AppImage)
+# release artifacts on every run; publishes them to a GitHub Release when a
+# version tag is pushed (with or without a leading v).
 
 name: release
 
@@ -104,15 +104,13 @@ jobs:
       - name: Build release artifacts
         run: pnpm release
 
-      - name: Collect artifacts and checksums
+      - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p dist
           cp src-tauri/target/release/bundle/nsis/*-setup.exe dist/
           cp src-tauri/target/portable/*.zip dist/
-          cd dist
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          ls -la dist
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -128,35 +126,176 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  linux-x64:
+    name: Linux x64 (AppImage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout MixchatDesktop
+        uses: actions/checkout@v4
+
+      - name: Checkout Mixchat
+        uses: actions/checkout@v4
+        with:
+          repository: grepfs17/Mixchat
+          ref: ${{ env.MIXCHAT_REF }}
+          path: Mixchat
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            librsvg2-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            pkg-config \
+            libwebkit2gtk-4.1-dev
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Cache Node sidecar downloads
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/.cache/node
+          key: node-sidecar-${{ runner.os }}
+
+      - name: Install dependencies
+        run: |
+          pnpm install
+          pnpm --dir Mixchat install
+
+      - name: Enable desktop build profile
+        env:
+          DESKTOP_TWITCH_CLIENT_ID: ${{ secrets.DESKTOP_TWITCH_CLIENT_ID }}
+          DESKTOP_YOUTUBE_CLIENT_ID: ${{ secrets.DESKTOP_YOUTUBE_CLIENT_ID }}
+          DESKTOP_YOUTUBE_CLIENT_SECRET: ${{ secrets.DESKTOP_YOUTUBE_CLIENT_SECRET }}
+        run: |
+          cp .env.desktop.example .env.desktop
+          {
+            echo "PUBLIC_TWITCH_CLIENT_ID=${DESKTOP_TWITCH_CLIENT_ID}"
+            echo "PUBLIC_YOUTUBE_CLIENT_ID=${DESKTOP_YOUTUBE_CLIENT_ID}"
+            echo "YOUTUBE_CLIENT_SECRET=${DESKTOP_YOUTUBE_CLIENT_SECRET}"
+          } >> .env.desktop
+
+      - name: Guard tag against package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag v$tag does not match package.json version $version" >&2
+            exit 1
+          fi
+
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build AppImage
+        run: pnpm release:linux
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp src-tauri/target/release/bundle/appimage/*.AppImage dist/
+          ls -la dist
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixchat-${{ steps.version.outputs.version }}-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  checksums:
+    name: Checksums
+    needs: [windows-x64, linux-x64]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.windows-x64.outputs.version }}
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-setup
+          path: dist
+
+      - name: Download Windows portable
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-portable
+          path: dist
+
+      - name: Download Linux AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-appimage
+          path: dist
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Upload checksums
         uses: actions/upload-artifact@v4
         with:
-          name: mixchat-${{ steps.version.outputs.version }}-checksums
+          name: mixchat-${{ needs.windows-x64.outputs.version }}-checksums
           path: dist/SHA256SUMS.txt
           if-no-files-found: error
 
   release:
     name: Publish GitHub release
-    needs: windows-x64
+    needs: [windows-x64, linux-x64, checksums]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - name: Download installer
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-${{ needs.windows-x64.outputs.version }}-setup
+          name: mixchat-${{ needs.checksums.outputs.version }}-setup
           path: dist
 
       - name: Download portable
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-${{ needs.windows-x64.outputs.version }}-portable
+          name: mixchat-${{ needs.checksums.outputs.version }}-portable
+          path: dist
+
+      - name: Download AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: mixchat-${{ needs.checksums.outputs.version }}-appimage
           path: dist
 
       - name: Download checksums
         uses: actions/download-artifact@v4
         with:
-          name: mixchat-${{ needs.windows-x64.outputs.version }}-checksums
+          name: mixchat-${{ needs.checksums.outputs.version }}-checksums
           path: dist
 
       - name: Create GitHub release

@@ -13,8 +13,8 @@ build must be assumed public**. Encryption or obfuscation only delays
 extraction.
 
 The app also bundles a Node runtime. Treat it like any other executable in the
-installer. The server binds to `127.0.0.1` by default and the webview loads a
-loopback origin.
+installer or AppImage. The server binds to `127.0.0.1` by default and the
+webview loads a loopback origin.
 
 ## What is embedded
 
@@ -126,6 +126,7 @@ web secrets and the guard refuses to proceed.
 
 ## Updates and code signing
 
-Auto-update is not configured in this build. Windows installers are manual
-installs for now. When auto-update is added, sign the NSIS installer and the
-update manifests before publishing.
+Auto-update is not configured in this build. Windows installers and Linux
+AppImages are manual installs for now. AppImages are unsigned. When auto-update
+is added, sign the NSIS installer, the AppImage, and the update manifests
+before publishing.

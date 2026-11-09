@@ -17,18 +17,28 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "category": "Entertainment",
+    "shortDescription": "Local Mixchat desktop shell",
+    "publisher": "Mixchat",
+    "homepage": "https://mixchat.grepfs.xyz/",
     "externalBin": ["binaries/mixchat-node"],
     "resources": {
       "resources/mixchat/dist": "mixchat/dist",
       "resources/mixchat/node_modules": "mixchat/node_modules"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
     },
     "windows": {
       "webviewInstallMode": {

@@ -1,22 +1,23 @@
 # MixchatDesktop
 
-Tauri 2 desktop shell for Mixchat on Windows. It runs Mixchat's
-Astro Node server as a bundled sidecar and opens the UI in the system WebView2
-runtime.
+Tauri 2 desktop shell for Mixchat. It runs Mixchat's
+Astro Node server as a bundled sidecar and opens the UI in the system webview
+(WebView2 on Windows, WebKitGTK on Linux).
 
 The [Mixchat](https://github.com/grepfs17/Mixchat) source is consumed as a
 sibling checkout (`../Mixchat`) and is not forked here.
 
 ## Requirements
 
-- Windows 10 or 11
+- Windows 10 or 11, or a recent Linux desktop with WebKitGTK
 - Node.js LTS and pnpm
 - Rust toolchain (`rustup`, `cargo`)
 - The [Mixchat](https://github.com/grepfs17/Mixchat) checkout at `../Mixchat`
 - A `.env.desktop` profile with OAuth client IDs
 
-The NSIS installer embeds the WebView2 bootstrapper, so a fresh machine can
-install the runtime during setup.
+The NSIS installer embeds the WebView2 bootstrapper, so a fresh Windows machine
+can install the runtime during setup. Linux AppImages bundle the libraries they
+need via linuxdeploy.
 
 ## Setup
 
@@ -139,6 +140,30 @@ The Windows SDK, Rust toolchain, and cargo registry are cached in
 `~/.cache/mixchat-tauri`. The GUI still needs WebView2, so run the extracted app
 on Windows.
 
+## Build the Linux AppImage
+
+On a Linux host with WebKitGTK development packages installed:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y build-essential curl wget file librsvg2-dev libssl-dev \
+  libgtk-3-dev libayatana-appindicator3-dev libxdo-dev pkg-config \
+  libwebkit2gtk-4.1-dev
+
+pnpm release:linux
+```
+
+`release:linux` runs `pnpm tauri:prepare` once, builds the AppImage, and fails
+if the artifact is missing. Output:
+
+`src-tauri/target/release/bundle/appimage/Mixchat-<version>_amd64.AppImage`
+
+`pnpm tauri:build` on Linux also produces the AppImage (the `nsis` target is
+filtered out on non-Windows hosts). The AppImage is unsigned. Data and logs
+live under the XDG app directories (`~/.local/share/xyz.grepfs.mixchat` and
+`~/.local/state/xyz.grepfs.mixchat/logs`). Expect a large artifact: it embeds
+the Node sidecar and the server bundle.
+
 ## How it works
 
 - `src-tauri/src/server.rs` spawns the Node sidecar, waits for
@@ -202,7 +227,9 @@ Windows job object prevents orphan processes.
 
 ## Linux
 
-*Work in progress
+Linux ships as an unsigned AppImage (see [Build the Linux AppImage](#build-the-linux-appimage)).
+CI builds it on `ubuntu-latest` for every release tag alongside the Windows
+artifacts. There is no `.deb`/`.rpm` package yet.
 
 ## License
 

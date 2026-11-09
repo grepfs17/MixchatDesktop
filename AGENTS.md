@@ -2,7 +2,7 @@
 
 ## Overview
 
-**MixchatDesktop** is a Tauri 2 desktop shell for Mixchat. A Rust shell (`src-tauri/`) spawns the Mixchat Astro server as a bundled Node sidecar (`mixchat-node`), waits for it to answer on `http://localhost:3000`, and opens the UI in a WebView2 window. The Mixchat source is consumed from the sibling checkout `../Mixchat` (https://github.com/grepfs17/Mixchat) and is not forked here. Windows-only distribution: NSIS installer and a portable zip.
+**MixchatDesktop** is a Tauri 2 desktop shell for Mixchat. A Rust shell (`src-tauri/`) spawns the Mixchat Astro server as a bundled Node sidecar (`mixchat-node`), waits for it to answer on `http://localhost:3000`, and opens the UI in the system webview (WebView2 on Windows, WebKitGTK on Linux). The Mixchat source is consumed from the sibling checkout `../Mixchat` (https://github.com/grepfs17/Mixchat) and is not forked here. Distribution: Windows NSIS installer and portable zip, Linux AppImage.
 - Build, run, and configuration details in README.md
 - Threat model and what ships inside binaries in SECURITY.md
 
@@ -56,10 +56,11 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 | `pnpm start` | Run the shell in local mode against the prepared bundle |
 | `pnpm server:build` | Build the Mixchat bundle and prepare it (path patching) |
 | `pnpm tauri:prepare` | Full prep: server bundle, resources, jsdom, Node sidecar |
-| `pnpm tauri:build` | NSIS installer (Windows host only) |
+| `pnpm tauri:build` | Installer for the host platform (NSIS on Windows, AppImage on Linux) |
 | `pnpm tauri:build:portable` | Portable zip for the host platform |
 | `pnpm tauri:build:portable:win` | Cross-build the Windows portable zip from Linux (Docker) |
-| `pnpm release` | Prepare once, build installer and portable, verify artifacts |
+| `pnpm release` | Windows: prepare once, build installer and portable, verify artifacts |
+| `pnpm release:linux` | Linux: prepare once, build AppImage, verify artifact |
 | `pnpm check:secrets` | Run the secret guard on demand |
 | `cargo check` / `cargo test` | Verify and test the Rust shell (inside `src-tauri/`) |
 
@@ -71,4 +72,4 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 - `src-tauri/src/menu.rs` - context menu items and the `show_context_menu` / `menu_action` commands
 - `src-tauri/src/logger.rs` - sidecar log capture with redaction
 - `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own menu commands (allowed by default for local origins)
-- `.github/workflows/release.yml` - Windows x64 CI (installer, portable, checksums, tag releases)
+- `.github/workflows/release.yml` - Windows x64 (installer, portable) and Linux x64 (AppImage) CI, combined checksums, tag releases
