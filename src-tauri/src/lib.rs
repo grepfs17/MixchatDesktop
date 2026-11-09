@@ -205,6 +205,135 @@ pub(crate) fn open_twitch_activation<R: tauri::Runtime>(
     open_twitch_child(app, "twitch-activate", "Authorize Twitch", url, false)
 }
 
+/// Small About window with project links. Content is written to a temp HTML
+/// file and loaded over `file://` so the page needs no IPC or custom protocol.
+pub(crate) fn open_about<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let version = app.package_info().version.to_string();
+    let path = std::env::temp_dir().join("mixchat-about.html");
+    std::fs::write(&path, about_html(&version))?;
+    let url = tauri::Url::from_file_path(&path)
+        .map_err(|_| tauri::Error::InvalidWebviewUrl("about page path"))?;
+
+    if let Some(window) = app.get_webview_window("about") {
+        let _ = window.navigate(url);
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    // Same event-loop constraint as the Twitch child windows: build off-thread.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let navigation_app = app.clone();
+        let window = WebviewWindowBuilder::new(&app, "about", WebviewUrl::External(url))
+            .title(format!("About Mixchat {version}"))
+            .theme(Some(tauri::Theme::Dark))
+            .inner_size(460.0, 420.0)
+            .resizable(false)
+            .maximizable(false)
+            .center()
+            .skip_taskbar(true)
+            .on_navigation(move |target| {
+                if matches!(target.scheme(), "http" | "https") {
+                    open_external_url(&navigation_app, target);
+                    return false;
+                }
+                true
+            })
+            .on_new_window(|_, _| NewWindowResponse::Deny)
+            .build();
+        match window {
+            Ok(window) => {
+                let _ = window.set_theme(Some(tauri::Theme::Dark));
+                let _ = window.set_focus();
+            }
+            Err(error) => eprintln!("[about] failed to open: {error}"),
+        }
+    });
+
+    Ok(())
+}
+
+fn about_html(version: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>About Mixchat</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0;
+    padding: 28px 28px 24px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0a0a0a;
+    color: #e5e5e5;
+    line-height: 1.5;
+  }}
+  h1 {{
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }}
+  .version {{
+    margin: 4px 0 0;
+    color: #a3a3a3;
+    font-size: 0.95rem;
+  }}
+  .desc {{
+    margin: 16px 0 20px;
+    color: #a3a3a3;
+    font-size: 0.9rem;
+  }}
+  ul {{
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }}
+  li {{ margin: 0; }}
+  a {{
+    display: block;
+    padding: 9px 12px;
+    margin: 0 -12px;
+    border-radius: 8px;
+    color: #7dd3fc;
+    text-decoration: none;
+    font-size: 0.95rem;
+  }}
+  a:hover {{ background: #171717; text-decoration: underline; }}
+  .meta {{
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid #262626;
+    color: #737373;
+    font-size: 0.8rem;
+  }}
+</style>
+</head>
+<body>
+  <h1>Mixchat Desktop</h1>
+  <p class="version">Version {version}</p>
+  <p class="desc">Tauri desktop shell that runs the Mixchat server locally.</p>
+  <nav aria-label="Project links">
+    <ul>
+      <li><a href="https://github.com/grepfs17/MixchatDesktop">GitHub repository</a></li>
+      <li><a href="https://github.com/grepfs17/MixchatDesktop/issues">Report an issue</a></li>
+      <li><a href="https://github.com/grepfs17/Mixchat">Mixchat source</a></li>
+      <li><a href="https://mixchat.grepfs.xyz/">mixchat.grepfs.xyz</a></li>
+    </ul>
+  </nav>
+  <p class="meta">Licensed under AGPL-3.0 · © 2026 Mixchat</p>
+</body>
+</html>
+"#
+    )
+}
+
 /// Hand a non-app URL to the system handler. Only `http`/`https`/`mailto`
 /// are allowed: the opener plugin's Rust-side methods do not enforce the
 /// plugin URL scope, so page-driven navigation must be filtered here or it

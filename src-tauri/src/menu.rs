@@ -16,6 +16,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let paste = PredefinedMenuItem::paste(app, Some("Paste"))?;
     let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))?;
 
+    let version = app.package_info().version.to_string();
+    let about =
+        MenuItem::with_id(app, "about", format!("About Mixchat ({version})"), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
     #[cfg(debug_assertions)]
@@ -47,6 +50,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&restart)?;
     menu.append(&logs)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&about)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&quit)?;
     Ok(menu)
@@ -90,6 +95,11 @@ pub fn handle_id<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "twitch-login" => {
             if let Err(error) = crate::open_twitch_login(app) {
                 eprintln!("[twitch-login] failed: {error}");
+            }
+        }
+        "about" => {
+            if let Err(error) = crate::open_about(app) {
+                eprintln!("[about] failed: {error}");
             }
         }
         _ => {}
