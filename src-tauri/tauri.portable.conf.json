@@ -1,7 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "app": {
-    "appDirectoriesOverride": "./app-data"
+    "appDirectoriesOverride": {
+      "config": "./app-data",
+      "data": "./app-data",
+      "cache": "./app-data/caches",
+      "log": "./app-data/logs"
+    }
   },
   "bundle": {
     "active": false

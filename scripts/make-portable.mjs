@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
 import {
   cp,
   mkdir,
@@ -89,8 +89,10 @@ await writeFile(
   path.join(folder, "app-data", "README.txt"),
   [
     "This folder is created by Mixchat.",
-    "Settings, sessions, chat history, logs, and WebView data are stored here.",
-    "Delete it while Mixchat is closed to start fresh.",
+    "Settings, chat history, and logs are stored here.",
+    "Login cookies live in %LOCALAPPDATA%\\xyz.grepfs.mixchat so sign-in",
+    "survives moving or re-extracting this folder.",
+    "Delete this folder while Mixchat is closed to start fresh.",
     "",
   ].join("\n"),
   "utf8",
@@ -101,14 +103,15 @@ const instructions = [
   "",
   `1. Keep this folder together. ${appName} needs ${sidecarName} and the mixchat folder.`,
   `2. Run ${appName}.`,
-  "3. Data is stored in the app-data folder next to the executable.",
-  "4. The app uses http://localhost:3000. Keep that port free.",
-  "5. Optional: copy .env.example to .env to override runtime settings.",
-  "6. OAuth client IDs are baked into this build at build time.",
+  "3. Settings, chat history, and logs are stored in the app-data folder next to the executable.",
+  "4. Login cookies are stored in %LOCALAPPDATA%\\xyz.grepfs.mixchat, so you stay signed in after re-extracting.",
+  "5. The app uses http://localhost:3000. Keep that port free.",
+  "6. Optional: copy .env.example to .env to override runtime settings.",
+  "7. OAuth client IDs are baked into this build at build time.",
 ];
 if (isWindows) {
   instructions.push(
-    "7. Requires the Microsoft Edge WebView2 runtime. Windows 11 includes it.",
+    "8. Requires the Microsoft Edge WebView2 runtime. Windows 11 includes it.",
   );
 }
 instructions.push("");
@@ -119,25 +122,48 @@ await writeFile(
   "utf8",
 );
 
-if (process.platform === "win32") {
+// Keep the zip format, but prefer a compressor with a higher deflate level
+// (7-Zip or Info-ZIP) over PowerShell's Compress-Archive, which is slower and
+// lands a few MB larger. Every branch writes a plain .zip.
+function commandAvailable(command) {
+  return spawnSync(command, [], { stdio: "ignore" }).error === undefined;
+}
+
+const candidates = [];
+if (commandAvailable("7z")) {
+  candidates.push(["7z", ["a", "-tzip", "-mx=9", zipName, "Mixchat"]]);
+}
+if (commandAvailable("zip")) {
+  candidates.push(["zip", ["-9", "-qr", zipName, "Mixchat"]]);
+}
+
+let compressed = false;
+for (const [command, commandArgs] of candidates) {
+  const result = spawnSync(command, commandArgs, {
+    cwd: portableRoot,
+    stdio: "inherit",
+  });
+  if ((result.status ?? 1) === 0) {
+    compressed = true;
+    break;
+  }
+  // A failed run can leave a partial archive behind that would poison the
+  // next candidate (or hide a stale one), so always start clean.
+  rmSync(zipPath, { force: true });
+}
+if (!compressed) {
+  if (process.platform !== "win32") {
+    console.error(
+      '[portable] Failed to create the zip. Install 7z or "zip", or build the archive manually.',
+    );
+    process.exit(1);
+  }
   const quote = (value) => value.replace(/'/g, "''");
   execFileSync("powershell.exe", [
     "-NoProfile",
     "-Command",
     `Compress-Archive -LiteralPath '${quote(folder)}' -DestinationPath '${quote(zipPath)}' -Force`,
   ]);
-} else {
-  try {
-    execFileSync("zip", ["-qr", zipName, "Mixchat"], {
-      cwd: portableRoot,
-      stdio: "inherit",
-    });
-  } catch {
-    console.error(
-      '[portable] "zip" is not available. Install zip or zip the folder manually.',
-    );
-    process.exit(1);
-  }
 }
 
 const size = await stat(zipPath);

@@ -111,10 +111,12 @@ This builds without an installer, applies `src-tauri/tauri.portable.conf.json`,
 and produces a zip at
 `src-tauri/target/portable/Mixchat-<version>-win-x64-portable.zip`.
 
-Extract the zip and run `Mixchat.exe`. Settings, sessions, chat history, logs,
-and WebView data live in the `app-data` folder next to the executable. The
-portable build does not write to AppData or the registry, so it can run from a
-USB stick or a user folder.
+Extract the zip and run `Mixchat.exe`. Settings, chat history, and logs live
+in the `app-data` folder next to the executable. Login cookies and the WebView
+profile live in `%LOCALAPPDATA%\xyz.grepfs.mixchat`, so sign-in survives moving
+or re-extracting the portable folder (and is shared with the installed build).
+The portable build does not write anything else to AppData or the registry, so
+it can run from a USB stick or a user folder.
 
 `pnpm tauri:portable` rebuilds the zip from an existing release build. Do not
 run the portable and installed builds at the same time because both use

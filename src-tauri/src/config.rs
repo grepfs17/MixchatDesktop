@@ -329,4 +329,35 @@ mod tests {
         assert!(!is_loopback_host("192.168.1.10"));
         assert!(!is_loopback_host("example.com"));
     }
+
+    /// The portable override must keep the WebView2 profile (login cookies)
+    /// on the OS default path so sign-in survives re-extracting the zip.
+    #[test]
+    fn portable_override_keeps_webview_data_stable() {
+        let raw = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.portable.conf.json"),
+        )
+        .expect("read tauri.portable.conf.json");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse portable config");
+        let override_value = value
+            .get("app")
+            .and_then(|app| app.get("appDirectoriesOverride"))
+            .cloned()
+            .expect("appDirectoriesOverride present");
+        let parsed: tauri::utils::config::AppDirectoriesOverride =
+            serde_json::from_value(override_value).expect("valid AppDirectoriesOverride");
+        match parsed {
+            tauri::utils::config::AppDirectoriesOverride::Directories(dirs) => {
+                assert!(
+                    dirs.local_data.is_none(),
+                    "localData must stay unset so the webview profile uses %LOCALAPPDATA%"
+                );
+                assert_eq!(dirs.config.as_deref(), Some(Path::new("./app-data")));
+                assert_eq!(dirs.data.as_deref(), Some(Path::new("./app-data")));
+                assert_eq!(dirs.cache.as_deref(), Some(Path::new("./app-data/caches")));
+                assert_eq!(dirs.log.as_deref(), Some(Path::new("./app-data/logs")));
+            }
+            other => panic!("expected Directories override, got {other:?}"),
+        }
+    }
 }
