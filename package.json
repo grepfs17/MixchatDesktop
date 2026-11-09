@@ -1,6 +1,6 @@
 {
   "name": "mixchat-desktop",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "license": "AGPL-3.0",
   "description": "Tauri desktop shell that runs the Mixchat Astro server locally.",
   "homepage": "https://mixchat.grepfs.xyz/",
