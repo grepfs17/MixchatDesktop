@@ -205,6 +205,31 @@ pub(crate) fn open_twitch_activation<R: tauri::Runtime>(
     open_twitch_child(app, "twitch-activate", "Authorize Twitch", url, false)
 }
 
+/// Opens the Twitch login guide in a child webview. The shell opens it when
+/// the device login starts and closes it through `/desktop/twitch-close` when
+/// the login succeeds or is cancelled.
+pub(crate) fn open_twitch_help<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let base = app
+        .try_state::<Arc<ServerState>>()
+        .map(|state| state.url().to_string())
+        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let mut url: tauri::Url = format!("{}/help/twitch-login", base.trim_end_matches('/'))
+        .parse()
+        .map_err(|_| tauri::Error::InvalidWebviewUrl("help url"))?;
+    url.query_pairs_mut().append_pair("mixchat-shell", "tauri");
+    open_twitch_child(app, "twitch-help", "Twitch login help", url, false)
+}
+
+/// Closes the Twitch login child windows (guide and activation page) when the
+/// page signals that the device login succeeded or was cancelled.
+pub(crate) fn close_twitch_login_windows<R: tauri::Runtime>(app: &AppHandle<R>) {
+    for label in ["twitch-help", "twitch-activate"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.close();
+        }
+    }
+}
+
 /// Small About window with project links. Content is written to a temp HTML
 /// file and loaded over `file://` so the page needs no IPC or custom protocol.
 pub(crate) fn open_about<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -433,6 +458,14 @@ window.addEventListener('keydown', (event) => {
                     let _ = open_twitch_login(&navigation_app);
                     return false;
                 }
+                if target.path() == "/desktop/twitch-help" {
+                    let _ = open_twitch_help(&navigation_app);
+                    return false;
+                }
+                if target.path() == "/desktop/twitch-close" {
+                    close_twitch_login_windows(&navigation_app);
+                    return false;
+                }
                 if let Some(activation) = twitch_activation_target(target) {
                     let _ = open_twitch_activation(&navigation_app, activation);
                     return false;
@@ -451,6 +484,14 @@ window.addEventListener('keydown', (event) => {
                 return NewWindowResponse::Deny;
             }
             if is_app_origin {
+                if target.path() == "/desktop/twitch-help" {
+                    let _ = open_twitch_help(&new_window_app);
+                    return NewWindowResponse::Deny;
+                }
+                if target.path() == "/desktop/twitch-close" {
+                    close_twitch_login_windows(&new_window_app);
+                    return NewWindowResponse::Deny;
+                }
                 if let Some(activation) = twitch_activation_target(&target) {
                     let _ = open_twitch_activation(&new_window_app, activation);
                     return NewWindowResponse::Deny;

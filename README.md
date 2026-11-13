@@ -215,8 +215,12 @@ The build guard fails if they appear.
 
 Twitch sign-in opens the device activation page in an in-app webview. That
 single login also stores Twitch's cookies in the shared WebView2 profile, so the
-embedded player is signed in with the same account. **Account > Log in to
-Twitch player** remains only as a fallback if the player cookies are missing.
+embedded player is signed in with the same account. Starting a sign-in also
+opens the login guide (`/help/twitch-login`) in a child window, and both child
+windows (guide and activation page) close when the login succeeds or is
+cancelled. The context menu has a **Twitch login help** item for opening the
+guide manually. **Account > Log in to Twitch player** remains only as a
+fallback if the player cookies are missing.
 
 ## Logs and recovery
 

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnvFile } from "./env.mjs";
@@ -48,6 +48,19 @@ console.log(
 );
 
 await ensureJsdom();
+
+// Local mode (pnpm start) runs the sidecar from build/mixchat/dist, which
+// cannot walk up to jsdom under src-tauri/resources/mixchat. Link it so the
+// PoToken/YouTube path resolves outside packaged builds too. Created after
+// the dist copy above so the link never ships inside resources.
+const buildServerDir = path.join(source, "dist", "server");
+if (existsSync(buildServerDir)) {
+  const buildModules = path.join(buildServerDir, "node_modules");
+  if (!existsSync(buildModules)) {
+    await symlink(path.join(destination, "node_modules"), buildModules, "dir");
+    console.log("[tauri-prepare] linked jsdom modules for local mode");
+  }
+}
 
 // Re-scan the *shipped* copy: the guard earlier runs on build/mixchat/dist,
 // but what actually lands in the binary is src-tauri/resources/mixchat.

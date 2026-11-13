@@ -34,6 +34,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         true,
         Some("CmdOrCtrl+Shift+T"),
     )?;
+    let twitch_help =
+        MenuItem::with_id(app, "twitch-help", "Twitch login help", true, None::<&str>)?;
 
     let menu = Menu::new(app)?;
     menu.append(&copy)?;
@@ -47,6 +49,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     menu.append(&fullscreen)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&twitch_login)?;
+    menu.append(&twitch_help)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&restart)?;
     menu.append(&logs)?;
@@ -95,6 +98,11 @@ pub fn handle_id<R: Runtime>(app: &AppHandle<R>, id: &str) {
         "twitch-login" => {
             if let Err(error) = crate::open_twitch_login(app) {
                 eprintln!("[twitch-login] failed: {error}");
+            }
+        }
+        "twitch-help" => {
+            if let Err(error) = crate::open_twitch_help(app) {
+                eprintln!("[twitch-help] failed: {error}");
             }
         }
         "about" => {
