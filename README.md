@@ -11,7 +11,7 @@ sibling checkout (`../Mixchat`) and is not forked here.
 
 - Windows 10 or 11, or a recent Linux desktop with WebKitGTK
 - Node.js LTS and pnpm
-- Rust toolchain (`rustup`, `cargo`)
+- Rust 1.90 or newer (`rustup`, `cargo`)
 - The [Mixchat](https://github.com/grepfs17/Mixchat) checkout at `../Mixchat`
 - A `.env.desktop` profile with OAuth client IDs
 
@@ -88,7 +88,8 @@ pnpm tauri:build
 ```
 
 The NSIS installer is written under
-`src-tauri/target/release/bundle/nsis/`.
+`src-tauri/target/release/bundle/nsis/`. The build also signs the updater
+artifact, so set `TAURI_SIGNING_PRIVATE_KEY` first (see [Updates](#updates)).
 
 `tauri:prepare` runs these steps:
 
@@ -110,14 +111,17 @@ pnpm tauri:build:portable
 
 This builds without an installer, applies `src-tauri/tauri.portable.conf.json`,
 and produces a zip at
-`src-tauri/target/portable/Mixchat-<version>-win-x64-portable.zip`.
+`src-tauri/target/portable/Mixchat-<version>-win-x64-portable.zip`. When
+`TAURI_SIGNING_PRIVATE_KEY` is set, the zip is also signed for portable updates
+(see [Updates](#updates)).
 
 Extract the zip and run `Mixchat.exe`. Settings, chat history, and logs live
 in the `app-data` folder next to the executable. Login cookies and the WebView
 profile live in `%LOCALAPPDATA%\xyz.grepfs.mixchat`, so sign-in survives moving
 or re-extracting the portable folder (and is shared with the installed build).
 The portable build does not write anything else to AppData or the registry, so
-it can run from a USB stick or a user folder.
+it can run from a USB stick or a user folder. Updates preserve `app-data` and
+only replace the program files.
 
 `pnpm tauri:portable` rebuilds the zip from an existing release build. Do not
 run the portable and installed builds at the same time because both use
@@ -154,7 +158,8 @@ pnpm release:linux
 ```
 
 `release:linux` runs `pnpm tauri:prepare` once, builds the AppImage, and fails
-if the artifact is missing. Output:
+if the artifact or its updater signature is missing. Set
+`TAURI_SIGNING_PRIVATE_KEY` first (see [Updates](#updates)). Output:
 
 `src-tauri/target/release/bundle/appimage/Mixchat-<version>_amd64.AppImage`
 
@@ -163,6 +168,48 @@ filtered out on non-Windows hosts). The AppImage is unsigned. Data and logs
 live under the XDG app directories (`~/.local/share/xyz.grepfs.mixchat` and
 `~/.local/state/xyz.grepfs.mixchat/logs`). Expect a large artifact: it embeds
 the Node sidecar and the server bundle.
+
+## Updates
+
+Installed Windows NSIS builds, Linux AppImages, and the portable Windows zip
+check for updates on launch, about 10 seconds after the window opens, and can
+check manually from the right-click menu (**Check for updates**). The updater
+runs entirely in Rust, so the webview still has no Tauri IPC permissions.
+
+The portable update downloads the signed portable zip and launches a short
+PowerShell helper. The helper waits for Mixchat to exit, replaces the program
+files, preserves `app-data`, and starts Mixchat again. It records the result in
+`app-data/logs/updater.log`.
+
+Updates are signed with minisign. The public key is in
+`src-tauri/tauri.conf.json` under `plugins.updater.pubkey`. The private key must
+never be committed. Local installer and AppImage builds need it in the
+environment:
+
+```bash
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/mixchat-updater.key")"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+```
+
+The release workflow reads the same values from the repository secrets
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (the key
+secret holds the file contents, not a path). Leave the password secret unset if
+the key was generated without one. It uploads the `.sig` files and generates
+`latest.json`, which points at
+`https://github.com/grepfs17/MixchatDesktop/releases/latest/download/latest.json`.
+That means the newest published GitHub Release must be the version clients
+should install, and it must not be marked as a prerelease.
+
+To generate a replacement keypair:
+
+```bash
+pnpm tauri signer generate -w ~/.tauri/mixchat-updater.key
+```
+
+Put the new public key (the `.pub` file contents) in `tauri.conf.json` and add
+the private key to the CI secret. Losing the private key or replacing the public
+key strands existing installs: they will reject future updates until a release
+signed with the old key migrates them. Keep a backup in a password manager.
 
 ## How it works
 

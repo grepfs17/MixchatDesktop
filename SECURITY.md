@@ -129,7 +129,28 @@ web secrets and the guard refuses to proceed.
 
 ## Updates and code signing
 
-Auto-update is not configured in this build. Windows installers and Linux
-AppImages are manual installs for now. AppImages are unsigned. When auto-update
-is added, sign the NSIS installer, the AppImage, and the update manifests
-before publishing.
+Installed Windows NSIS builds and Linux AppImages use Tauri's updater plugin.
+The shell checks
+`https://github.com/grepfs17/MixchatDesktop/releases/latest/download/latest.json`
+over HTTPS and installs only artifacts whose minisign signature matches the
+public key baked into `src-tauri/tauri.conf.json`. The private key lives only
+in the `TAURI_SIGNING_PRIVATE_KEY` CI secret. An attacker who can replace the
+manifest or the download cannot install code without that key.
+
+The portable Windows zip uses the same signed manifest entry
+(`windows-x86_64-portable`). After the signed zip is downloaded, the app exits
+and a bundled PowerShell helper waits for the process to finish, extracts the
+zip, replaces the program files, preserves `app-data`, and restarts the app.
+The helper script is embedded in the Rust binary and paths are passed as
+arguments. The zip is verified before it reaches the helper.
+
+The NSIS installer and AppImage are still not Authenticode or OS-code-signed,
+so Windows SmartScreen and Linux desktops may warn on first manual install.
+Updater artifacts are signed separately, and the updater verifies that
+signature before running the installer or replacing the AppImage. The updater
+runs from Rust, so it does not add any Tauri IPC permission to the webview.
+
+If the update signing key is lost, existing installs cannot verify new
+artifacts. Rotating the public key in the app requires shipping the new key
+through a release signed with the old key. Back up the private key and its
+password outside the repository.

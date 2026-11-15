@@ -48,8 +48,20 @@ impl ServerState {
         &self.config.url
     }
 
+    pub fn mode(&self) -> Mode {
+        self.config.mode
+    }
+
     pub fn log_path(&self) -> std::path::PathBuf {
         self.logger.path().to_path_buf()
+    }
+
+    pub fn log_info(&self, message: impl AsRef<str>) {
+        self.logger.info(message);
+    }
+
+    pub fn log_error(&self, message: impl AsRef<str>) {
+        self.logger.error(message);
     }
 
     pub fn restart(self: &Arc<Self>) {

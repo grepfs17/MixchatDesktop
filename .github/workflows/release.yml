@@ -102,6 +102,9 @@ jobs:
         run: echo "sha=$(git -C Mixchat rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build release artifacts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm release
 
       - name: Collect artifacts
@@ -109,21 +112,27 @@ jobs:
         run: |
           mkdir -p dist
           cp src-tauri/target/release/bundle/nsis/*-setup.exe dist/
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig dist/
           cp src-tauri/target/portable/*.zip dist/
+          cp src-tauri/target/portable/*.zip.sig dist/
           ls -la dist
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: mixchat-${{ steps.version.outputs.version }}-setup
-          path: dist/*-setup.exe
+          path: |
+            dist/*-setup.exe
+            dist/*-setup.exe.sig
           if-no-files-found: error
 
       - name: Upload portable
         uses: actions/upload-artifact@v4
         with:
           name: mixchat-${{ steps.version.outputs.version }}-portable
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.zip.sig
           if-no-files-found: error
 
   linux-x64:
@@ -215,19 +224,25 @@ jobs:
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Build AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm release:linux
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
           cp src-tauri/target/release/bundle/appimage/*.AppImage dist/
+          cp src-tauri/target/release/bundle/appimage/*.AppImage.sig dist/
           ls -la dist
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
           name: mixchat-${{ steps.version.outputs.version }}-appimage
-          path: dist/*.AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sig
           if-no-files-found: error
 
   checksums:
@@ -274,6 +289,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+
       - name: Download installer
         uses: actions/download-artifact@v4
         with:
@@ -297,6 +315,13 @@ jobs:
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-checksums
           path: dist
+
+      - name: Generate updater manifest
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.checksums.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: node scripts/make-latest-json.mjs --dist dist
 
       - name: Create GitHub release
         env:

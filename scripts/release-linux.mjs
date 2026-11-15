@@ -72,6 +72,16 @@ if (images.length === 0) {
   );
   process.exit(1);
 }
+const signature = `${images[0]}.sig`;
+if (!existsSync(path.join(appImageDir, signature))) {
+  console.error(
+    "[release-linux] updater signature missing. Set TAURI_SIGNING_PRIVATE_KEY before building.",
+  );
+  process.exit(1);
+}
 console.log(
   `[release-linux] appimage: src-tauri/target/release/bundle/appimage/${images[0]}`,
+);
+console.log(
+  `[release-linux] signature: src-tauri/target/release/bundle/appimage/${signature}`,
 );

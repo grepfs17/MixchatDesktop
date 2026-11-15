@@ -73,8 +73,39 @@ if (process.platform === "win32") {
     console.error("[release] NSIS installer missing from target/release/bundle/nsis/");
     process.exit(1);
   }
+  const signature = `${installers[0]}.sig`;
+  if (!existsSync(path.join(nsisDir, signature))) {
+    console.error(
+      "[release] updater signature missing. Set TAURI_SIGNING_PRIVATE_KEY before building.",
+    );
+    process.exit(1);
+  }
   console.log(
     `[release] installer: src-tauri/target/release/bundle/nsis/${installers[0]}`,
+  );
+  console.log(
+    `[release] signature: src-tauri/target/release/bundle/nsis/${signature}`,
+  );
+
+  const portableDir = path.join(projectRoot, "src-tauri", "target", "portable");
+  const portableZips = existsSync(portableDir)
+    ? readdirSync(portableDir).filter((name) =>
+        name.endsWith("-portable.zip"),
+      )
+    : [];
+  if (portableZips.length === 0) {
+    console.error("[release] portable zip missing from target/portable/");
+    process.exit(1);
+  }
+  const portableSignature = `${portableZips[0]}.sig`;
+  if (!existsSync(path.join(portableDir, portableSignature))) {
+    console.error(
+      "[release] portable updater signature missing. Set TAURI_SIGNING_PRIVATE_KEY before building.",
+    );
+    process.exit(1);
+  }
+  console.log(
+    `[release] portable signature: src-tauri/target/portable/${portableSignature}`,
   );
 } else {
   console.warn(

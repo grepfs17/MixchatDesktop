@@ -27,6 +27,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         MenuItem::with_id(app, "fullscreen", "Toggle Fullscreen", true, Some("F11"))?;
     let restart = MenuItem::with_id(app, "restart-server", "Restart server", true, None::<&str>)?;
     let logs = MenuItem::with_id(app, "open-logs", "Open logs", true, None::<&str>)?;
+    let check_updates =
+        MenuItem::with_id(app, "check-updates", "Check for updates", true, None::<&str>)?;
     let twitch_login = MenuItem::with_id(
         app,
         "twitch-login",
@@ -54,6 +56,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     menu.append(&restart)?;
     menu.append(&logs)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&check_updates)?;
     menu.append(&about)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&quit)?;
@@ -105,6 +108,7 @@ pub fn handle_id<R: Runtime>(app: &AppHandle<R>, id: &str) {
                 eprintln!("[twitch-help] failed: {error}");
             }
         }
+        "check-updates" => crate::updater::check_manual(app.clone()),
         "about" => {
             if let Err(error) = crate::open_about(app) {
                 eprintln!("[about] failed: {error}");

@@ -65,11 +65,12 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 | `cargo check` / `cargo test` | Verify and test the Rust shell (inside `src-tauri/`) |
 
 ## Project structure
-- `scripts/` - build pipeline (Mixchat bundle, path patching, resources, Node sidecar fetch, secret guard, portable packaging, release orchestration)
+- `scripts/` - build pipeline (Mixchat bundle, path patching, resources, Node sidecar fetch, secret guard, updater manifest, portable packaging, release orchestration)
 - `src-tauri/src/lib.rs` - window creation, navigation policy, initialization script (right-click menu and keyboard shortcuts bridge)
 - `src-tauri/src/server.rs` - sidecar spawn, health check, restart loop, shutdown
 - `src-tauri/src/config.rs` - env loading, sidecar env allowlist, packaged-mode hardening
 - `src-tauri/src/menu.rs` - context menu items and the `show_context_menu` / `menu_action` commands
+- `src-tauri/src/updater.rs` - signed update checks, download progress, install and restart for NSIS, AppImage, and the portable zip
 - `src-tauri/src/logger.rs` - sidecar log capture with redaction
 - `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own menu commands (allowed by default for local origins)
 - `.github/workflows/release.yml` - Windows x64 (installer, portable) and Linux x64 (AppImage) CI, combined checksums, tag releases

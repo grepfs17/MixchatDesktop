@@ -15,6 +15,13 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const tauriCli = path.join(
+  projectRoot,
+  "node_modules",
+  "@tauri-apps",
+  "cli",
+  "tauri.js",
+);
 const tauriRoot = path.join(projectRoot, "src-tauri");
 const portableRoot = path.join(tauriRoot, "target", "portable");
 const folder = path.join(portableRoot, "Mixchat");
@@ -170,3 +177,44 @@ const size = await stat(zipPath);
 console.log(
   `[portable] ${zipPath} (${(size.size / 1024 / 1024).toFixed(1)} MB)`,
 );
+
+rmSync(`${zipPath}.sig`, { force: true });
+
+let privateKey = process.env.TAURI_SIGNING_PRIVATE_KEY;
+const privateKeyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH;
+if (!privateKey && privateKeyPath) {
+  privateKey = await readFile(privateKeyPath, "utf8");
+}
+if (privateKey && existsSync(privateKey)) {
+  privateKey = await readFile(privateKey, "utf8");
+}
+if (privateKey) {
+  const signEnv = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: privateKey };
+  delete signEnv.TAURI_SIGNING_PRIVATE_KEY_PATH;
+  const result = spawnSync(
+    process.execPath,
+    [
+      tauriCli,
+      "signer",
+      "sign",
+      "--app-version",
+      packageJson.version,
+      zipPath,
+    ],
+    { cwd: projectRoot, stdio: "inherit", env: signEnv },
+  );
+  if ((result.status ?? 1) !== 0) {
+    console.error("[portable] failed to sign the updater zip");
+    process.exit(1);
+  }
+  const signaturePath = `${zipPath}.sig`;
+  if (!existsSync(signaturePath)) {
+    console.error(`[portable] signature missing: ${signaturePath}`);
+    process.exit(1);
+  }
+  console.log(`[portable] signature: ${signaturePath}`);
+} else {
+  console.warn(
+    "[portable] TAURI_SIGNING_PRIVATE_KEY is not set; the zip will not support portable updates.",
+  );
+}

@@ -3,6 +3,7 @@ mod logger;
 mod loopback;
 mod menu;
 mod server;
+mod updater;
 
 use std::sync::Arc;
 
@@ -33,6 +34,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             menu::show_context_menu,
@@ -43,6 +45,8 @@ pub fn run() {
             app.handle().set_theme(Some(tauri::Theme::Dark));
             let handle = app.handle().clone();
             let app_config = AppConfig::load(&handle)?;
+            let auto_update =
+                app_config.mode == config::Mode::Packaged && updater::updates_supported();
             let logger = Arc::new(Logger::new(&app_config.log_dir)?);
 
             logger.info(format!(
@@ -82,14 +86,19 @@ pub fn run() {
 
             tauri::async_runtime::spawn(async move {
                 match state.start().await {
-                    Ok(()) => {
-                        if let Err(error) = create_main_window(&handle, &state) {
+                    Ok(()) => match create_main_window(&handle, &state) {
+                        Ok(()) => {
+                            if auto_update {
+                                updater::check_in_background(handle.clone());
+                            }
+                        }
+                        Err(error) => {
                             logger.error(format!("failed to create main window: {error}"));
                             show_error(&handle, &logger, &format!(
                                 "Mixchat could not open its window.\n\n{error}"
                             ));
                         }
-                    }
+                    },
                     Err(error) => {
                         logger.error(format!("server failed to start: {error}"));
                         show_error(&handle, &logger, &error);
