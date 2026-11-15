@@ -23,7 +23,14 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        // The webview has no IPC permissions, so the plugin's click interceptor
+        // must stay off. It prevents the default action and then fails to open
+        // the URL. Rust-side navigation handling opens external links instead.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
