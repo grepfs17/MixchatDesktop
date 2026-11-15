@@ -90,17 +90,29 @@ impl AppConfig {
         let port = setting("MIXCHAT_PORT")
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(3000);
-        let url = setting("MIXCHAT_URL")
-            .unwrap_or_else(|| format!("http://localhost:{port}"));
 
         // Packaged builds must not expose the local server to the LAN by
         // accident: privileged endpoints (/api/desktop/open, auth handoff)
         // assume a loopback-only peer.
-        if mode == Mode::Packaged && !is_loopback_host(&host) {
-            eprintln!(
-                "[mixchat] MIXCHAT_HOST={host} is not loopback; forcing 127.0.0.1 in packaged mode"
-            );
-            host = "127.0.0.1".to_string();
+        if mode == Mode::Packaged {
+            if !is_loopback_host(&host) {
+                eprintln!(
+                    "[mixchat] MIXCHAT_HOST={host} is not loopback; forcing 127.0.0.1 in packaged mode"
+                );
+                host = "127.0.0.1".to_string();
+            }
+            // Bind a literal address so the sidecar and the loopback origin
+            // guard agree on exactly one address.
+            if host.eq_ignore_ascii_case("localhost") {
+                host = "127.0.0.1".to_string();
+            }
+        }
+
+        let url = setting("MIXCHAT_URL")
+            .unwrap_or_else(|| format!("http://localhost:{port}"));
+
+        if mode == Mode::Packaged {
+            validate_packaged_url(&url, port)?;
         }
 
         let server_entry = match mode {
@@ -204,6 +216,18 @@ impl AppConfig {
             env,
         })
     }
+
+    /// The window origin host and port. The host has IPv6 brackets removed.
+    pub fn url_host(&self) -> Option<(String, u16)> {
+        let parsed = tauri::Url::parse(&self.url).ok()?;
+        let host = parsed
+            .host_str()?
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string();
+        let port = parsed.port_or_known_default()?;
+        Some((host, port))
+    }
 }
 
 fn exe_anchored(path: PathBuf) -> PathBuf {
@@ -216,13 +240,43 @@ fn exe_anchored(path: PathBuf) -> PathBuf {
         .unwrap_or(path)
 }
 
-fn is_loopback_host(host: &str) -> bool {
+pub(crate) fn is_loopback_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
     host.parse::<std::net::IpAddr>()
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
+}
+
+/// A packaged build must load a loopback window origin on the server's port.
+/// The loopback origin guard owns the address family the sidecar did not bind.
+fn validate_packaged_url(url: &str, port: u16) -> Result<(), String> {
+    let parsed = tauri::Url::parse(url)
+        .map_err(|error| format!("invalid MIXCHAT_URL {url}: {error}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err(format!(
+            "MIXCHAT_URL must use http or https, got {}",
+            parsed.scheme()
+        ));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "MIXCHAT_URL has no host".to_string())?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if !is_loopback_host(host) {
+        return Err(format!(
+            "MIXCHAT_URL host {host} is not loopback in packaged mode"
+        ));
+    }
+    let url_port = parsed.port_or_known_default().unwrap_or(port);
+    if url_port != port {
+        return Err(format!(
+            "MIXCHAT_URL port {url_port} must match MIXCHAT_PORT {port}"
+        ));
+    }
+    Ok(())
 }
 
 /// Keys from `.env` files that may be forwarded to the Node sidecar.
@@ -359,5 +413,23 @@ mod tests {
             }
             other => panic!("expected Directories override, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn packaged_url_accepts_loopback_hosts() {
+        assert!(validate_packaged_url("http://localhost:3000", 3000).is_ok());
+        assert!(validate_packaged_url("http://127.0.0.1:3000", 3000).is_ok());
+        assert!(validate_packaged_url("http://[::1]:3000", 3000).is_ok());
+    }
+
+    #[test]
+    fn packaged_url_rejects_remote_host() {
+        assert!(validate_packaged_url("http://example.com:3000", 3000).is_err());
+        assert!(validate_packaged_url("https://evil.test:3000", 3000).is_err());
+    }
+
+    #[test]
+    fn packaged_url_rejects_port_mismatch() {
+        assert!(validate_packaged_url("http://localhost:4000", 3000).is_err());
     }
 }

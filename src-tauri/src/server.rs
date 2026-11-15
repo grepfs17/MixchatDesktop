@@ -10,12 +10,14 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::config::{AppConfig, Mode};
 use crate::logger::Logger;
+use crate::loopback::LoopbackGuard;
 
 pub struct ServerState {
     app: AppHandle,
     config: AppConfig,
     logger: Arc<Logger>,
     child: Mutex<Option<(u64, CommandChild)>>,
+    loopback: Mutex<Option<LoopbackGuard>>,
     shutting_down: AtomicBool,
     restarting: AtomicBool,
     attempts: AtomicU32,
@@ -33,6 +35,7 @@ impl ServerState {
             config,
             logger,
             child: Mutex::new(None),
+            loopback: Mutex::new(None),
             shutting_down: AtomicBool::new(false),
             restarting: AtomicBool::new(false),
             attempts: AtomicU32::new(0),
@@ -60,9 +63,28 @@ impl ServerState {
             return;
         }
         self.attempts.store(0, Ordering::SeqCst);
-        if let Err(error) = self.spawn() {
-            self.logger.error(format!("server restart failed: {error}"));
-        }
+        let state = self.clone();
+        tauri::async_runtime::spawn(async move {
+            // Give the old child time to release the port, then refuse to
+            // spawn into an address another process owns.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let host = state.config.host.clone();
+                let port = state.config.port;
+                let free =
+                    tauri::async_runtime::spawn_blocking(move || !port_in_use(&host, port))
+                        .await
+                        .unwrap_or(false);
+                if free || Instant::now() >= deadline {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            if let Err(error) = state.spawn() {
+                state.logger.error(format!("server restart failed: {error}"));
+                state.schedule_restart();
+            }
+        });
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<(), String> {
@@ -81,8 +103,35 @@ impl ServerState {
             ));
         }
 
+        self.install_loopback_guard()?;
         self.spawn()?;
         self.wait_for_health(Duration::from_secs(60)).await
+    }
+
+    /// Own every loopback address the window hostname resolves to that the
+    /// sidecar does not bind, so another local user cannot answer the app
+    /// origin through the other address family.
+    fn install_loopback_guard(self: &Arc<Self>) -> Result<(), String> {
+        if self.loopback.lock().unwrap().is_some() {
+            return Ok(());
+        }
+        let Some((host, url_port)) = self.config.url_host() else {
+            return Err(format!("MIXCHAT_URL is not a valid URL: {}", self.config.url));
+        };
+        if !crate::config::is_loopback_host(&host) {
+            return Ok(());
+        }
+        if url_port != self.config.port {
+            return Err(format!(
+                "MIXCHAT_URL port {url_port} must match MIXCHAT_PORT {}",
+                self.config.port
+            ));
+        }
+        let bind_addr = resolve_addr(&self.config.host, self.config.port)
+            .ok_or_else(|| format!("cannot resolve {}:{}", self.config.host, self.config.port))?;
+        let guard = LoopbackGuard::install(&host, url_port, bind_addr)?;
+        *self.loopback.lock().unwrap() = Some(guard);
+        Ok(())
     }
 
     fn spawn(self: &Arc<Self>) -> Result<(), String> {
@@ -91,6 +140,13 @@ impl ServerState {
         }
         if self.child.lock().unwrap().is_some() {
             return Err("server is already running".to_string());
+        }
+
+        if port_in_use(&self.config.host, self.config.port) {
+            return Err(format!(
+                "port {} is already in use; refusing to start the sidecar",
+                self.config.port
+            ));
         }
 
         let entry = self
@@ -264,6 +320,9 @@ impl ServerState {
 
     pub fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
+        if let Some(guard) = self.loopback.lock().unwrap().take() {
+            drop(guard);
+        }
         if let Some((_, child)) = self.child.lock().unwrap().take() {
             if let Err(error) = child.kill() {
                 self.logger.warn(format!("failed to kill server: {error}"));

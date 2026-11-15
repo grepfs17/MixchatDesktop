@@ -101,39 +101,127 @@ fn redact_url_credentials(input: &str) -> String {
     result
 }
 
-/// Redact the value after sensitive `key=` / `key:` markers.
+/// Redact the value after sensitive keys in `key=value`, `key: value`,
+/// `"key":"value"`, and header forms. Offsets are computed on an ASCII-only
+/// lowercase copy, which keeps byte positions identical to the original even
+/// when the line contains multi-byte characters.
 fn redact_key_values(out: &mut String) {
-    const MARKERS: &[&str] = &[
-        "password=",
-        "passwd=",
-        "token=",
-        "secret=",
-        "api_key=",
-        "apikey=",
-        "authorization:",
-        "cookie:",
+    const KEYS: &[&str] = &[
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "api_key",
+        "apikey",
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "client_secret",
+        "code_verifier",
+        "potoken",
     ];
-    let lower = out.to_lowercase();
-    // Collect edits first so replacements don't shift later offsets.
+    let lower = out.to_ascii_lowercase();
+    let lower_bytes = lower.as_bytes();
+    let bytes = out.as_bytes();
     let mut edits: Vec<(usize, usize)> = Vec::new();
-    for marker in MARKERS {
-        let mut search_from = 0;
-        while let Some(rel) = lower[search_from..].find(marker) {
-            let value_start = search_from + rel + marker.len();
-            let value_end = out[value_start..]
-                .find(|c: char| c == '&' || c == ';' || c.is_whitespace() || c == '"')
-                .map(|i| value_start + i)
-                .unwrap_or(out.len());
-            if value_end > value_start {
-                edits.push((value_start, value_end));
+    for key in KEYS {
+        let key_bytes = key.as_bytes();
+        let mut from = 0;
+        while from + key_bytes.len() <= lower_bytes.len() {
+            let Some(rel) = find_bytes(&lower_bytes[from..], key_bytes) else {
+                break;
+            };
+            let key_start = from + rel;
+            let mut i = key_start + key_bytes.len();
+            if i < lower_bytes.len() && lower_bytes[i] == b'"' {
+                i += 1;
             }
-            search_from = value_start;
+            while i < lower_bytes.len() && lower_bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i >= lower_bytes.len() || (lower_bytes[i] != b'=' && lower_bytes[i] != b':') {
+                from = key_start + key_bytes.len();
+                continue;
+            }
+            i += 1;
+            while i < lower_bytes.len() && lower_bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i >= bytes.len() {
+                from = key_start + key_bytes.len();
+                continue;
+            }
+            if is_header_key(key) {
+                let mut end = i;
+                while end < bytes.len() && bytes[end] != b'\r' && bytes[end] != b'\n' {
+                    end += 1;
+                }
+                while end > i && bytes[end - 1].is_ascii_whitespace() {
+                    end -= 1;
+                }
+                if end > i {
+                    edits.push((i, end));
+                }
+                from = end.max(i);
+                continue;
+            }
+            if bytes[i] == b'"' {
+                let start = i + 1;
+                if let Some(rel_end) = bytes[start..].iter().position(|&b| b == b'"') {
+                    let end = start + rel_end;
+                    if end > start {
+                        edits.push((start, end));
+                    }
+                    from = end + 1;
+                    continue;
+                }
+            }
+            let mut end = i;
+            while end < bytes.len() {
+                let b = bytes[end];
+                if b == b'&' || b == b';' || b == b'"' || b.is_ascii_whitespace() {
+                    break;
+                }
+                end += 1;
+            }
+            if end > i {
+                edits.push((i, end));
+            }
+            from = end.max(i);
         }
     }
-    edits.sort();
-    for (start, end) in edits.into_iter().rev() {
-        out.replace_range(start..end, "***");
+    edits.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in edits {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((start, end));
     }
+    for (start, end) in merged.into_iter().rev() {
+        if start < end && end <= out.len() {
+            out.replace_range(start..end, "***");
+        }
+    }
+}
+
+fn is_header_key(key: &str) -> bool {
+    matches!(key, "authorization" | "cookie" | "set-cookie")
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 #[cfg(test)]
@@ -168,5 +256,49 @@ mod tests {
         assert!(!out.contains(":p@"));
         assert!(out.contains("u:***@one.test"));
         assert!(out.contains("https://ok.test/y"));
+    }
+
+    #[test]
+    fn redacts_authorization_header() {
+        let out = redact("Authorization: Bearer abc123secret");
+        assert!(!out.contains("abc123secret"));
+        assert!(out.contains("Authorization: ***"));
+    }
+
+    #[test]
+    fn redacts_cookie_header() {
+        let out = redact("cookie: session=abc123secret; theme=dark");
+        assert!(!out.contains("abc123secret"));
+        assert!(out.contains("cookie: ***"));
+    }
+
+    #[test]
+    fn redacts_json_token() {
+        let out = redact(r#"{"access_token":"abc123secret","other":1}"#);
+        assert!(!out.contains("abc123secret"));
+        assert!(out.contains(r#""access_token":"***""#));
+    }
+
+    #[test]
+    fn redacts_refresh_token_colon() {
+        let out = redact("refresh_token: abc123secret");
+        assert!(!out.contains("abc123secret"));
+        assert!(out.contains("refresh_token: ***"));
+    }
+
+    #[test]
+    fn redaction_survives_expanding_lowercase() {
+        // U+0130 lowercases to two code points, which used to shift offsets
+        // computed on the original string.
+        let out = redact("İtoken=abc123secret");
+        assert!(!out.contains("abc123secret"));
+        assert!(out.contains("İtoken=***"));
+    }
+
+    #[test]
+    fn redacts_multiple_keys_in_one_line() {
+        let out = redact("token=abc123secret&secret=def456secret");
+        assert!(!out.contains("abc123secret"));
+        assert!(!out.contains("def456secret"));
     }
 }

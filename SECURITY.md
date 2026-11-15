@@ -115,6 +115,9 @@ web secrets and the guard refuses to proceed.
   `window.open` targets are opened in the system browser as well.
 - The server sidecar is started by Rust. The sidecar name and arguments are fixed
   at build time.
+- The shell holds every loopback address the window hostname resolves to that
+  the sidecar did not bind, and forwards those connections to the sidecar. An
+  IPv6-only listener on `localhost` cannot answer the window origin.
 - `POST /api/desktop/open` only exists in desktop builds, accepts only `http(s)`
   URLs, and spawns the system browser. It never navigates the webview.
 - The Node child runs in its own process group or job object so it is killed with

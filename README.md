@@ -169,6 +169,10 @@ the Node sidecar and the server bundle.
 - `src-tauri/src/server.rs` spawns the Node sidecar, waits for
   `/api/parent-domain`, logs stdout and stderr, restarts crashes with backoff,
   and kills the process on exit.
+- The shell holds every loopback address the window hostname resolves to that
+  the sidecar did not bind, and forwards those connections to the sidecar, so
+  another local user cannot answer the window origin through the other address
+  family.
 - The window loads `MIXCHAT_URL` (default `http://localhost:3000`). Keep the
   host and port aligned with the OAuth redirect URIs.
 - Server data lives under the Tauri app data directory. Logs live under the app
