@@ -13,7 +13,7 @@ build must be assumed public**. Encryption or obfuscation only delays
 extraction.
 
 The app also bundles a Node runtime. Treat it like any other executable in the
-installer or AppImage. The server binds to `127.0.0.1` by default and the
+installer, AppImage, or DMG. The server binds to `127.0.0.1` by default and the
 webview loads a loopback origin.
 
 ## What is embedded
@@ -129,7 +129,8 @@ web secrets and the guard refuses to proceed.
 
 ## Updates and code signing
 
-Installed Windows NSIS builds and Linux AppImages use Tauri's updater plugin.
+Installed Windows NSIS builds, Linux AppImages, and macOS builds use Tauri's
+updater plugin.
 The shell checks
 `https://github.com/grepfs17/MixchatDesktop/releases/latest/download/latest.json`
 over HTTPS and installs only artifacts whose minisign signature matches the
@@ -144,11 +145,14 @@ zip, replaces the program files, preserves `app-data`, and restarts the app.
 The helper script is embedded in the Rust binary and paths are passed as
 arguments. The zip is verified before it reaches the helper.
 
-The NSIS installer and AppImage are still not Authenticode or OS-code-signed,
-so Windows SmartScreen and Linux desktops may warn on first manual install.
-Updater artifacts are signed separately, and the updater verifies that
-signature before running the installer or replacing the AppImage. The updater
-runs from Rust, so it does not add any Tauri IPC permission to the webview.
+The NSIS installer, AppImage, and macOS DMG are still not Authenticode,
+Apple-signed, or notarized, so Windows SmartScreen, Linux desktops, and
+Gatekeeper may warn or block the first manual install. On macOS the app is
+unsigned, so the user must open it once via right-click, Open, and confirm in
+System Settings. Updater artifacts are signed separately, and the updater
+verifies that signature before running the installer, replacing the AppImage,
+or replacing the app bundle. The updater runs from Rust, so it does not add any
+Tauri IPC permission to the webview.
 
 If the update signing key is lost, existing installs cannot verify new
 artifacts. Rotating the public key in the app requires shipping the new key

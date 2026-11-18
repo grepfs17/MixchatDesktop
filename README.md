@@ -2,14 +2,14 @@
 
 Tauri 2 desktop shell for Mixchat. It runs Mixchat's
 Astro Node server as a bundled sidecar and opens the UI in the system webview
-(WebView2 on Windows, WebKitGTK on Linux).
+(WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS).
 
 The [Mixchat](https://github.com/grepfs17/Mixchat) source is consumed as a
 sibling checkout (`../Mixchat`) and is not forked here.
 
 ## Requirements
 
-- Windows 10 or 11, or a recent Linux desktop with WebKitGTK
+- Windows 10 or 11, macOS 13.5 or newer, or a recent Linux desktop with WebKitGTK
 - Node.js LTS and pnpm
 - Rust 1.90 or newer (`rustup`, `cargo`)
 - The [Mixchat](https://github.com/grepfs17/Mixchat) checkout at `../Mixchat`
@@ -169,10 +169,32 @@ live under the XDG app directories (`~/.local/share/xyz.grepfs.mixchat` and
 `~/.local/state/xyz.grepfs.mixchat/logs`). Expect a large artifact: it embeds
 the Node sidecar and the server bundle.
 
+## Build the macOS app
+
+On a macOS host with the Xcode command line tools installed:
+
+```bash
+pnpm release:macos
+```
+
+`release:macos` runs `pnpm tauri:prepare` once, builds the `.app` and `.dmg`,
+and fails if the DMG or the updater signature is missing. Set
+`TAURI_SIGNING_PRIVATE_KEY` first (see [Updates](#updates)). Output:
+
+- `src-tauri/target/release/bundle/dmg/Mixchat-<version>_aarch64.dmg`
+- `src-tauri/target/release/bundle/macos/Mixchat.app.tar.gz` and `.sig`
+
+The build targets Apple Silicon (arm64) and macOS 13.5 or newer because the
+bundled Node sidecar requires 13.5. It is not signed or notarized with an Apple
+Developer ID, so Gatekeeper blocks the first launch. Open it once with
+right-click, Open, then confirm in System Settings, Privacy & Security, Open
+Anyway.
+
 ## Updates
 
-Installed Windows NSIS builds, Linux AppImages, and the portable Windows zip
-check for updates on launch, about 10 seconds after the window opens, and can
+Installed Windows NSIS builds, Linux AppImages, macOS builds, and the portable
+Windows zip check for updates on launch, about 10 seconds after the window
+opens, and can
 check manually from the right-click menu (**Check for updates**). The updater
 runs entirely in Rust, so the webview still has no Tauri IPC permissions.
 
@@ -296,6 +318,13 @@ Windows job object prevents orphan processes.
 Linux ships as an unsigned AppImage (see [Build the Linux AppImage](#build-the-linux-appimage)).
 CI builds it on `ubuntu-latest` for every release tag alongside the Windows
 artifacts. There is no `.deb`/`.rpm` package yet.
+
+## macOS
+
+macOS ships as an unsigned arm64 DMG (see [Build the macOS app](#build-the-macos-app)).
+CI builds it on `macos-latest` for every release tag alongside the Windows and
+Linux artifacts. The updater uses the signed `Mixchat.app.tar.gz` archive, which
+is separate from the DMG used for manual installs.
 
 ## License
 

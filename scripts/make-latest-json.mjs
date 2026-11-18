@@ -61,6 +61,7 @@ function assetUrl(name) {
 const windows = findAsset("-setup.exe");
 const portable = findAsset("-portable.zip");
 const linux = findAsset(".AppImage");
+const macos = findAsset(".app.tar.gz");
 
 const manifest = {
   version,
@@ -79,6 +80,10 @@ const manifest = {
       signature: signature(linux),
       url: assetUrl(linux),
     },
+    "darwin-aarch64": {
+      signature: signature(macos),
+      url: assetUrl(macos),
+    },
   },
 };
 
@@ -87,5 +92,5 @@ writeFileSync(
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
 console.log(
-  `[latest-json] wrote latest.json for ${windows}, ${portable}, and ${linux} (version ${version})`,
+  `[latest-json] wrote latest.json for ${windows}, ${portable}, ${linux}, and ${macos} (version ${version})`,
 );

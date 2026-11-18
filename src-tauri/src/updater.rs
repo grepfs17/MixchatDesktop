@@ -18,6 +18,7 @@ pub fn is_supported_install() -> bool {
     match tauri::utils::platform::bundle_type() {
         Some(BundleType::Nsis) => cfg!(windows),
         Some(BundleType::AppImage) => cfg!(target_os = "linux"),
+        Some(BundleType::App) => cfg!(target_os = "macos"),
         _ => false,
     }
 }
