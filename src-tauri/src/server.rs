@@ -389,3 +389,73 @@ fn http_ok(host: &str, port: u16) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn respond_once(status: &'static str) -> (u16, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind responder");
+        let port = listener.local_addr().expect("responder address").port();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept probe");
+            let mut buffer = [0u8; 512];
+            let _ = stream.read(&mut buffer);
+            let _ = stream.write_all(status.as_bytes());
+            let _ = stream.flush();
+        });
+        (port, handle)
+    }
+
+    fn unused_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind probe");
+        let port = listener.local_addr().expect("probe address").port();
+        drop(listener);
+        port
+    }
+
+    #[test]
+    fn health_host_maps_wildcard_binds_to_loopback() {
+        assert_eq!(health_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(health_host("::"), "::1");
+        assert_eq!(health_host("127.0.0.1"), "127.0.0.1");
+        assert_eq!(health_host("localhost"), "localhost");
+    }
+
+    #[test]
+    fn resolve_addr_preserves_port() {
+        let address = resolve_addr("127.0.0.1", 3456).expect("resolve loopback");
+        assert_eq!(address.port(), 3456);
+        assert_eq!(address.ip().to_string(), "127.0.0.1");
+    }
+
+    #[test]
+    fn port_in_use_detects_listening_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let port = listener.local_addr().expect("listener address").port();
+        assert!(port_in_use("127.0.0.1", port));
+        drop(listener);
+        assert!(!port_in_use("127.0.0.1", port));
+    }
+
+    #[test]
+    fn http_ok_accepts_200_response() {
+        let (port, responder) = respond_once("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        assert!(http_ok("127.0.0.1", port));
+        responder.join().expect("join responder");
+    }
+
+    #[test]
+    fn http_ok_rejects_error_response() {
+        let (port, responder) = respond_once("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+        assert!(!http_ok("127.0.0.1", port));
+        responder.join().expect("join responder");
+    }
+
+    #[test]
+    fn http_ok_rejects_closed_port() {
+        assert!(!http_ok("127.0.0.1", unused_port()));
+    }
+}

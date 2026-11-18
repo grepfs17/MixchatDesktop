@@ -518,3 +518,24 @@ fn truncate(text: &str, max_chars: usize) -> String {
         truncated
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::truncate;
+
+    #[test]
+    fn truncate_keeps_text_at_or_under_limit() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_adds_ellipsis_only_when_cut() {
+        assert_eq!(truncate("hello!", 5), "hello...");
+    }
+
+    #[test]
+    fn truncate_counts_characters_not_bytes() {
+        assert_eq!(truncate("áéíóú", 3), "áéí...");
+    }
+}

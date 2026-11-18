@@ -236,6 +236,17 @@ signed with the old key migrates them. Keep a backup in a password manager.
 - The window loads `?mixchat-shell=tauri` so the shared bundle selects the
   desktop auth flow even when webview initialization scripts are skipped.
 
+## Tests
+
+```bash
+pnpm test          # Rust shell and build-script tests
+pnpm test:rust     # cargo test inside src-tauri/
+pnpm test:scripts  # node --test on scripts/*.test.mjs
+```
+
+The script tests use temporary directories and never touch the real
+`../Mixchat` checkout or `.env` files.
+
 ## Configuration
 
 The shell reads these `MIXCHAT_*` keys.
