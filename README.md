@@ -196,7 +196,10 @@ Installed Windows NSIS builds, Linux AppImages, macOS builds, and the portable
 Windows zip check for updates on launch, about 10 seconds after the window
 opens, and can
 check manually from the right-click menu (**Check for updates**). The updater
-runs entirely in Rust, so the webview still has no Tauri IPC permissions.
+runs entirely in Rust, so the webview still has no Tauri IPC permissions. Before
+the NSIS installer replaces files, the shell stops the `mixchat-node.exe`
+sidecar, and `src-tauri/windows/installer-hooks.nsh` kills any leftover sidecar
+so its executable is not locked during the install.
 
 The portable update downloads the signed portable zip and launches a short
 PowerShell helper. The helper waits for Mixchat to exit, replaces the program

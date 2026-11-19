@@ -111,7 +111,21 @@ async fn check<R: Runtime>(app: &AppHandle<R>, interactive: bool) -> Result<(), 
     let updater = if portable {
         app.updater_builder().target(PORTABLE_TARGET).build()
     } else {
-        app.updater()
+        // The Windows updater replaces the app via `std::process::exit`, which
+        // skips our RunEvent::Exit shutdown. Kill the sidecar there or it keeps
+        // mixchat-node.exe locked and the installer cannot overwrite it.
+        let shutdown_state = app
+            .try_state::<Arc<ServerState>>()
+            .map(|state| state.inner().clone());
+        let exit_app = app.clone();
+        app.updater_builder()
+            .on_before_exit(move || {
+                if let Some(state) = &shutdown_state {
+                    state.shutdown();
+                }
+                exit_app.cleanup_before_exit();
+            })
+            .build()
     }
     .map_err(|error| error.to_string())?;
     let update = updater
@@ -450,6 +464,12 @@ async fn install_portable<R: Runtime>(app: &AppHandle<R>, update: &Update) -> Re
             app,
             format!("portable update {} staged for install", update.version),
         );
+        // Stop the sidecar now instead of relying on the RunEvent::Exit handler.
+        // The helper waits for this process, then replaces mixchat-node.exe, so
+        // the sidecar must already be gone.
+        if let Some(state) = app.try_state::<Arc<ServerState>>() {
+            state.shutdown();
+        }
         app.exit(0);
         Ok(())
     }
