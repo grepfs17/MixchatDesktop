@@ -26,22 +26,22 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout MixchatDesktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout Mixchat
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: grepfs17/Mixchat
           ref: ${{ env.MIXCHAT_REF }}
           path: Mixchat
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: pnpm
@@ -55,7 +55,7 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Cache Node sidecar downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: src-tauri/.cache/node
           key: node-sidecar-${{ runner.os }}
@@ -118,7 +118,7 @@ jobs:
           ls -la dist
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mixchat-${{ steps.version.outputs.version }}-setup
           path: |
@@ -127,7 +127,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload portable
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mixchat-${{ steps.version.outputs.version }}-portable
           path: |
@@ -141,10 +141,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout MixchatDesktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout Mixchat
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: grepfs17/Mixchat
           ref: ${{ env.MIXCHAT_REF }}
@@ -167,12 +167,12 @@ jobs:
             libwebkit2gtk-4.1-dev
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: pnpm
@@ -186,7 +186,7 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Cache Node sidecar downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: src-tauri/.cache/node
           key: node-sidecar-${{ runner.os }}
@@ -237,7 +237,7 @@ jobs:
           ls -la dist
 
       - name: Upload AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mixchat-${{ steps.version.outputs.version }}-appimage
           path: |
@@ -251,22 +251,22 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout MixchatDesktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Checkout Mixchat
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: grepfs17/Mixchat
           ref: ${{ env.MIXCHAT_REF }}
           path: Mixchat
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 12
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: pnpm
@@ -280,7 +280,7 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Cache Node sidecar downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: src-tauri/.cache/node
           key: node-sidecar-${{ runner.os }}
@@ -332,7 +332,7 @@ jobs:
           ls -la dist
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mixchat-${{ steps.version.outputs.version }}-macos
           path: |
@@ -349,25 +349,25 @@ jobs:
       version: ${{ needs.windows-x64.outputs.version }}
     steps:
       - name: Download Windows installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.windows-x64.outputs.version }}-setup
           path: dist
 
       - name: Download Windows portable
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.windows-x64.outputs.version }}-portable
           path: dist
 
       - name: Download Linux AppImage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.windows-x64.outputs.version }}-appimage
           path: dist
 
       - name: Download macOS
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.windows-x64.outputs.version }}-macos
           path: dist
@@ -379,7 +379,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Upload checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mixchat-${{ needs.windows-x64.outputs.version }}-checksums
           path: dist/SHA256SUMS.txt
@@ -392,34 +392,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout scripts
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-setup
           path: dist
 
       - name: Download portable
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-portable
           path: dist
 
       - name: Download AppImage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-appimage
           path: dist
 
       - name: Download macOS
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-macos
           path: dist
 
       - name: Download checksums
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: mixchat-${{ needs.checksums.outputs.version }}-checksums
           path: dist
