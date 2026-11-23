@@ -47,6 +47,9 @@
       "resources/mixchat/dist": "mixchat/dist",
       "resources/mixchat/node_modules": "mixchat/node_modules"
     },
+    "macOS": {
+      "minimumSystemVersion": "13.5"
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": false

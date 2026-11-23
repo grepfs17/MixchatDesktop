@@ -74,7 +74,7 @@ fn start<R: Runtime>(app: AppHandle<R>, interactive: bool) {
         let result = check(&app, interactive).await;
         CHECK_RUNNING.store(false, Ordering::SeqCst);
         if let Err(error) = result {
-            if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = crate::tabs::first_window(&app) {
                 let _ = window.set_title("Mixchat");
             }
             log_error(&app, format!("update check failed: {error}"));
@@ -188,7 +188,7 @@ async fn check<R: Runtime>(app: &AppHandle<R>, interactive: bool) -> Result<(), 
         return Ok(());
     }
 
-    let window = app.get_webview_window("main");
+    let window = crate::tabs::first_window(app);
     let mut downloaded = 0u64;
     let mut last_percent = 0u8;
 
@@ -369,7 +369,7 @@ async fn install_portable<R: Runtime>(app: &AppHandle<R>, update: &Update) -> Re
             .to_string_lossy()
             .to_string();
 
-        let window = app.get_webview_window("main");
+        let window = crate::tabs::first_window(app);
         let mut downloaded = 0u64;
         let mut last_percent = 0u8;
         let bytes = update

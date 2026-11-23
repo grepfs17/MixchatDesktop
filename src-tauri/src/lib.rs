@@ -4,6 +4,7 @@ mod logger;
 mod loopback;
 mod menu;
 mod server;
+mod tabs;
 mod updater;
 
 use std::sync::Arc;
@@ -19,11 +20,7 @@ use tauri_plugin_opener::OpenerExt;
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            tabs::focus_first_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         // The webview has no IPC permissions, so the plugin's click interceptor
@@ -37,6 +34,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .register_uri_scheme_protocol(tabs::SCHEME, |_ctx, request| {
+            tabs::tab_strip_response(&request)
+        })
         .invoke_handler(tauri::generate_handler![
             menu::show_context_menu,
             menu::menu_action,
@@ -44,7 +44,16 @@ pub fn run() {
             downloads::download_snapshot,
             downloads::download_cancel,
             downloads::download_dismiss,
-            downloads::download_reveal
+            downloads::download_reveal,
+            tabs::tabs_ready,
+            tabs::tabs_select,
+            tabs::tabs_close,
+            tabs::tabs_new,
+            tabs::tabs_new_window,
+            tabs::tabs_toggle_mute,
+            tabs::tabs_cycle,
+            tabs::tabs_select_index,
+            tabs::tab_meta
         ])
         .on_menu_event(menu::handle)
         .setup(|app| {
@@ -53,6 +62,8 @@ pub fn run() {
             let app_config = AppConfig::load(&handle)?;
             downloads::init_tls();
             app.manage(downloads::Downloads::new(&app_config.url));
+            app.manage(tabs::Tabs::new());
+            app.manage(menu::ContextTarget::default());
             let auto_update =
                 app_config.mode == config::Mode::Packaged && updater::updates_supported();
             let logger = Arc::new(Logger::new(&app_config.log_dir)?);
@@ -94,19 +105,12 @@ pub fn run() {
 
             tauri::async_runtime::spawn(async move {
                 match state.start().await {
-                    Ok(()) => match create_main_window(&handle, &state) {
-                        Ok(()) => {
-                            if auto_update {
-                                updater::check_in_background(handle.clone());
-                            }
+                    Ok(()) => {
+                        tabs::create_window(&handle, None);
+                        if auto_update {
+                            updater::check_in_background(handle.clone());
                         }
-                        Err(error) => {
-                            logger.error(format!("failed to create main window: {error}"));
-                            show_error(&handle, &logger, &format!(
-                                "Mixchat could not open its window.\n\n{error}"
-                            ));
-                        }
-                    },
+                    }
                     Err(error) => {
                         logger.error(format!("server failed to start: {error}"));
                         show_error(&handle, &logger, &error);
@@ -153,7 +157,6 @@ fn open_twitch_child<R: tauri::Runtime>(
     std::thread::spawn(move || {
         let navigation_app = app.clone();
         let popup_app = app.clone();
-        let main_window = app.get_webview_window("main");
         let nav_label = label.clone();
         let popup_label = label.clone();
         #[cfg(debug_assertions)]
@@ -194,16 +197,15 @@ fn open_twitch_child<R: tauri::Runtime>(
         };
         let _ = window.set_theme(Some(tauri::Theme::Dark));
 
-        // The player only sees the new cookies after its iframe is recreated.
+        // The player only sees the new cookies after its iframe is recreated,
+        // and every tab may be showing a stream.
         if reload_main_on_close {
-            if let Some(main) = main_window {
-                let main = main.clone();
-                window.on_window_event(move |event| {
-                    if matches!(event, tauri::WindowEvent::Destroyed) {
-                        let _ = main.reload();
-                    }
-                });
-            }
+            let reload_app = app.clone();
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    tabs::reload_all(&reload_app);
+                }
+            });
         }
     });
 
@@ -388,7 +390,7 @@ fn about_html(version: &str) -> String {
 /// are allowed: the opener plugin's Rust-side methods do not enforce the
 /// plugin URL scope, so page-driven navigation must be filtered here or it
 /// could trigger `smb://`, `file://`, or other custom schemes.
-fn open_external_url<R: tauri::Runtime>(app: &AppHandle<R>, url: &tauri::Url) {
+pub(crate) fn open_external_url<R: tauri::Runtime>(app: &AppHandle<R>, url: &tauri::Url) {
     if matches!(url.scheme(), "http" | "https" | "mailto") {
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     } else {
@@ -396,7 +398,7 @@ fn open_external_url<R: tauri::Runtime>(app: &AppHandle<R>, url: &tauri::Url) {
     }
 }
 
-fn twitch_activation_target(target: &tauri::Url) -> Option<tauri::Url> {
+pub(crate) fn twitch_activation_target(target: &tauri::Url) -> Option<tauri::Url> {
     if target.path() != "/desktop/twitch-activate" {
         return None;
     }
@@ -417,123 +419,6 @@ fn twitch_activation_target(target: &tauri::Url) -> Option<tauri::Url> {
         return None;
     }
     Some(parsed)
-}
-
-const INITIALIZATION_SCRIPT: &str = concat!(
-    r#"window.__MIXCHAT_SHELL__ = 'tauri';
-window.addEventListener('contextmenu', (event) => {
-  event.preventDefault();
-  window.__TAURI_INTERNALS__.invoke('show_context_menu');
-});
-window.addEventListener('keydown', (event) => {
-  const mod = event.ctrlKey || event.metaKey;
-  const key = event.key.toLowerCase();
-  if (mod && event.shiftKey && key === 't') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'twitch-login' });
-  } else if (mod && !event.altKey && key === 'r') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'reload' });
-  } else if (mod && !event.altKey && key === 'q') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'quit' });
-  } else if (!mod && event.key === 'F11') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'fullscreen' });
-  } else if (!mod && event.key === 'F12') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'devtools' });
-  }
-});"#,
-    "\n",
-    include_str!("downloads_ui.js"),
-);
-
-fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Result<()> {
-    if app.get_webview_window("main").is_some() {
-        return Ok(());
-    }
-
-    let mut url: tauri::Url = state
-        .url()
-        .parse()
-        .unwrap_or_else(|_| "http://localhost:3000".parse().unwrap());
-    // The query parameter is the reliable shell marker. It survives the
-    // webview initialization script being skipped on remote URLs.
-    url.query_pairs_mut()
-        .append_pair("mixchat-shell", "tauri");
-    #[cfg(debug_assertions)]
-    eprintln!("[window] loading {url}");
-
-    let navigation_app = app.clone();
-    let new_window_app = app.clone();
-    // Exact origin (scheme + host + port), matching the old Electron
-    // allowlist. Host-only comparison would also admit http:// when the app
-    // is on https://, and any-port loopback would admit unrelated local
-    // services (port scanners, printers, dev servers).
-    let app_origin = url.origin().ascii_serialization();
-    let new_window_origin = app_origin.clone();
-
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-        .title("Mixchat")
-        .theme(Some(tauri::Theme::Dark))
-        .inner_size(1600.0, 900.0)
-        .min_inner_size(900.0, 600.0)
-        .initialization_script(INITIALIZATION_SCRIPT)
-        .on_navigation(move |target| {
-            let is_app_origin = target.origin().ascii_serialization() == app_origin;
-            if is_app_origin {
-                if target.path() == "/desktop/twitch-login" {
-                    let _ = open_twitch_login(&navigation_app);
-                    return false;
-                }
-                if target.path() == "/desktop/twitch-help" {
-                    let _ = open_twitch_help(&navigation_app);
-                    return false;
-                }
-                if target.path() == "/desktop/twitch-close" {
-                    close_twitch_login_windows(&navigation_app);
-                    return false;
-                }
-                if let Some(activation) = twitch_activation_target(target) {
-                    let _ = open_twitch_activation(&navigation_app, activation);
-                    return false;
-                }
-                return true;
-            }
-            open_external_url(&navigation_app, target);
-            false
-        })
-        .on_new_window(move |target, _features| {
-            let is_app_origin = target.origin().ascii_serialization() == new_window_origin;
-            let is_twitch_login =
-                is_app_origin && target.path() == "/desktop/twitch-login";
-            if is_twitch_login {
-                let _ = open_twitch_login(&new_window_app);
-                return NewWindowResponse::Deny;
-            }
-            if is_app_origin {
-                if target.path() == "/desktop/twitch-help" {
-                    let _ = open_twitch_help(&new_window_app);
-                    return NewWindowResponse::Deny;
-                }
-                if target.path() == "/desktop/twitch-close" {
-                    close_twitch_login_windows(&new_window_app);
-                    return NewWindowResponse::Deny;
-                }
-                if let Some(activation) = twitch_activation_target(&target) {
-                    let _ = open_twitch_activation(&new_window_app, activation);
-                    return NewWindowResponse::Deny;
-                }
-            }
-            open_external_url(&new_window_app, &target);
-            NewWindowResponse::Deny
-        })
-        .build()?;
-    let _ = window.set_theme(Some(tauri::Theme::Dark));
-
-    let _ = window.set_focus();
-    Ok(())
 }
 
 /// Strip `user:password@` from a URL before it is logged.

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main Mixchat window. The window loads the local Mixchat server, so no core or plugin permissions are granted. Child windows (Twitch) are intentionally absent and get zero IPC.",
-  "windows": ["main"],
+  "description": "Workspace windows (main and window-*) and their tab/content webviews. The pages load the local Mixchat server, so no core or plugin permissions are granted; only the app's own commands are used. Twitch and about child windows are intentionally absent and get zero IPC.",
+  "windows": ["main", "window-*"],
   "permissions": []
 }
