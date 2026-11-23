@@ -2,7 +2,7 @@
 
 ## Overview
 
-**MixchatDesktop** is a Tauri 2 desktop shell for Mixchat. A Rust shell (`src-tauri/`) spawns the Mixchat Astro server as a bundled Node sidecar (`mixchat-node`), waits for it to answer on `http://localhost:3000`, and opens the UI in the system webview (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS). The Mixchat source is consumed from the sibling checkout `../Mixchat` (https://github.com/grepfs17/Mixchat) and is not forked here. Distribution: Windows NSIS installer and portable zip, Linux AppImage, macOS arm64 DMG.
+**MixchatDesktop** is a Tauri 2 desktop shell for Mixchat. A Rust shell (`src-tauri/`) spawns the Mixchat Astro server as a bundled Node sidecar (`mixchat-node`), waits for it to answer on `http://localhost:3000`, and opens the UI in system webviews (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS). Each native window hosts a tab strip and one webview per stream tab. The Mixchat source is consumed from the sibling checkout `../Mixchat` (https://github.com/grepfs17/Mixchat) and is not forked here. Distribution: Windows NSIS installer and portable zip, Linux AppImage, macOS arm64 DMG.
 - Build, run, and configuration details in README.md
 - Threat model and what ships inside binaries in SECURITY.md
 
@@ -67,7 +67,8 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 
 ## Project structure
 - `scripts/` - build pipeline (Mixchat bundle, path patching, resources, Node sidecar fetch, secret guard, updater manifest, portable packaging, release orchestration)
-- `src-tauri/src/lib.rs` - window creation, navigation policy, initialization script (right-click menu and keyboard shortcuts bridge)
+- `src-tauri/src/lib.rs` - app setup, custom tab-strip protocol, Twitch/about child windows, navigation policy for external URLs
+- `src-tauri/src/tabs.rs` - workspace windows, tab strip, one content webview per tab, native mute, tab/window commands and shortcuts
 - `src-tauri/src/server.rs` - sidecar spawn, health check, restart loop, shutdown
 - `src-tauri/src/config.rs` - env loading, sidecar env allowlist, packaged-mode hardening
 - `src-tauri/src/menu.rs` - context menu items and the `show_context_menu` / `menu_action` commands
@@ -75,5 +76,5 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 - `src-tauri/src/downloads_ui.js` - injected download panel and anchor click interception, concatenated into the initialization script
 - `src-tauri/src/updater.rs` - signed update checks, download progress, install and restart for NSIS, AppImage, macOS, and the portable zip
 - `src-tauri/src/logger.rs` - sidecar log capture with redaction
-- `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own commands (menu and downloads, allowed by default for local origins)
+- `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own commands (menu, downloads, and tabs, allowed by default for local origins)
 - `.github/workflows/release.yml` - Windows x64 (installer, portable), Linux x64 (AppImage), and macOS arm64 (DMG) CI, combined checksums, tag releases

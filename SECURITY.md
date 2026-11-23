@@ -109,10 +109,18 @@ web secrets and the guard refuses to proceed.
 
 ## Runtime boundaries
 
-- The main window loads `http://localhost:<port>`. It is not granted remote
-  Tauri IPC permissions, so page JavaScript cannot invoke shell commands.
+- Workspace windows load `http://localhost:<port>`. The capability lists only
+  the workspace windows (`main` and `window-*`) and grants no core or plugin
+  permissions. The gate on the app's own commands (menu, downloads, tabs) is
+  the page origin rather than that window list: with no command permissions
+  defined, Tauri allows a local origin outright and rejects any non-local one.
+  The local origins are the Mixchat server and the tab strip, so remote pages
+  never reach the commands.
+- Twitch and about child windows are outside that capability and run remote
+  origins, so their pages are rejected before app commands are dispatched.
 - Navigation away from localhost is cancelled and opened in the system browser.
-  `window.open` targets are opened in the system browser as well.
+  App-origin `window.open` targets open in a new tab, external ones in the
+  system browser.
 - The server sidecar is started by Rust. The sidecar name and arguments are fixed
   at build time.
 - The shell holds every loopback address the window hostname resolves to that

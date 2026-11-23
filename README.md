@@ -52,6 +52,24 @@ System Settings, Privacy & Security.
 - The right-click menu can restart the server, open the current log file, and
   open the Twitch login help.
 
+### Windows and tabs
+
+- `Ctrl/Cmd+N` opens a new window. Each window has its own tab strip and each
+  window can show a different stream.
+- `Ctrl/Cmd+T` adds a tab, `Ctrl/Cmd+W` closes it, and `Ctrl/Cmd+Shift+W`
+  closes the whole window. Middle-click also closes a tab.
+- `Ctrl/Cmd+Tab` or `Ctrl/Cmd+Shift+Tab` cycles tabs. `Ctrl/Cmd+1` through
+  `Ctrl/Cmd+9` jumps to a tab, and `9` selects the last one. With the tab strip
+  focused, the left and right arrow keys move between tabs.
+- Every tab has a mute button. `Ctrl/Cmd+Shift+M` mutes or unmutes the active
+  tab. Muting silences chat sounds and the stream together.
+- Hidden tabs keep their page, chat connection, and stream alive. Mute the
+  background streams you do not want to hear.
+- **Open stream in new window** in the right-click menu duplicates the current
+  stream into a separate window.
+- On macOS, muting a tab suspends media playback instead of changing a gain;
+  unmuting resumes it.
+
 ## Development
 
 ### Requirements
@@ -241,6 +259,11 @@ signed with the old key migrates them.
   the sidecar did not bind, and forwards those connections to the sidecar. This
   stops another local user from answering the window origin through the other
   address family.
+- `tabs.rs` owns the workspace model. A workspace is a native window with one
+  tab-strip webview and one content webview per tab, built on Tauri's
+  `unstable` multi-webview API. Hidden tabs are kept alive, and native mute
+  uses WebView2's `IsMuted`, WebKitGTK's `is-muted`, or macOS media suspension.
+  The tab strip is served from the `mixchat-tabs` custom protocol.
 - The window loads `MIXCHAT_URL` (default `http://localhost:3000`). Keep the
   host and port aligned with OAuth redirect URIs.
 - Server data lives in the Tauri app data directory. Logs are available from
