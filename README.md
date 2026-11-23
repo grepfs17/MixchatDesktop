@@ -254,6 +254,11 @@ signed with the old key migrates them.
 - OAuth and Twitch activation URLs open with `POST /api/desktop/open` on the
   local server. The webview never navigates for those links, which avoids the
   WebView2 reload.
+- Downloads from the local Mixchat server are taken over by the shell. The
+  injected script cancels the anchor download, `downloads.rs` streams the file
+  to the user's Downloads folder with the webview cookies, and an in-page panel
+  shows byte progress, speed, cancel, and a show-in-folder action. The webview's
+  own download UI is never shown, on every platform the same way.
 
 ### Tests
 

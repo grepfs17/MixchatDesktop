@@ -1,4 +1,5 @@
 mod config;
+mod downloads;
 mod logger;
 mod loopback;
 mod menu;
@@ -38,13 +39,20 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             menu::show_context_menu,
-            menu::menu_action
+            menu::menu_action,
+            downloads::download_start,
+            downloads::download_snapshot,
+            downloads::download_cancel,
+            downloads::download_dismiss,
+            downloads::download_reveal
         ])
         .on_menu_event(menu::handle)
         .setup(|app| {
             app.handle().set_theme(Some(tauri::Theme::Dark));
             let handle = app.handle().clone();
             let app_config = AppConfig::load(&handle)?;
+            downloads::init_tls();
+            app.manage(downloads::Downloads::new(&app_config.url));
             let auto_update =
                 app_config.mode == config::Mode::Packaged && updater::updates_supported();
             let logger = Arc::new(Logger::new(&app_config.log_dir)?);
@@ -411,6 +419,36 @@ fn twitch_activation_target(target: &tauri::Url) -> Option<tauri::Url> {
     Some(parsed)
 }
 
+const INITIALIZATION_SCRIPT: &str = concat!(
+    r#"window.__MIXCHAT_SHELL__ = 'tauri';
+window.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  window.__TAURI_INTERNALS__.invoke('show_context_menu');
+});
+window.addEventListener('keydown', (event) => {
+  const mod = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (mod && event.shiftKey && key === 't') {
+    event.preventDefault();
+    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'twitch-login' });
+  } else if (mod && !event.altKey && key === 'r') {
+    event.preventDefault();
+    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'reload' });
+  } else if (mod && !event.altKey && key === 'q') {
+    event.preventDefault();
+    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'quit' });
+  } else if (!mod && event.key === 'F11') {
+    event.preventDefault();
+    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'fullscreen' });
+  } else if (!mod && event.key === 'F12') {
+    event.preventDefault();
+    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'devtools' });
+  }
+});"#,
+    "\n",
+    include_str!("downloads_ui.js"),
+);
+
 fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Result<()> {
     if app.get_webview_window("main").is_some() {
         return Ok(());
@@ -441,33 +479,7 @@ fn create_main_window(app: &AppHandle, state: &Arc<ServerState>) -> tauri::Resul
         .theme(Some(tauri::Theme::Dark))
         .inner_size(1600.0, 900.0)
         .min_inner_size(900.0, 600.0)
-        .initialization_script(
-            r#"window.__MIXCHAT_SHELL__ = 'tauri';
-window.addEventListener('contextmenu', (event) => {
-  event.preventDefault();
-  window.__TAURI_INTERNALS__.invoke('show_context_menu');
-});
-window.addEventListener('keydown', (event) => {
-  const mod = event.ctrlKey || event.metaKey;
-  const key = event.key.toLowerCase();
-  if (mod && event.shiftKey && key === 't') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'twitch-login' });
-  } else if (mod && !event.altKey && key === 'r') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'reload' });
-  } else if (mod && !event.altKey && key === 'q') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'quit' });
-  } else if (!mod && event.key === 'F11') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'fullscreen' });
-  } else if (!mod && event.key === 'F12') {
-    event.preventDefault();
-    window.__TAURI_INTERNALS__.invoke('menu_action', { id: 'devtools' });
-  }
-});"#,
-        )
+        .initialization_script(INITIALIZATION_SCRIPT)
         .on_navigation(move |target| {
             let is_app_origin = target.origin().ascii_serialization() == app_origin;
             if is_app_origin {

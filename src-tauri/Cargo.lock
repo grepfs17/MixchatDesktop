@@ -2167,10 +2167,12 @@ dependencies = [
 
 [[package]]
 name = "mixchat-desktop"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "chrono",
  "dotenvy",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

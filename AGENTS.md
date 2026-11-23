@@ -71,7 +71,9 @@ Build-time keys (`.env.desktop`, see `.env.desktop.example`, baked into the Mixc
 - `src-tauri/src/server.rs` - sidecar spawn, health check, restart loop, shutdown
 - `src-tauri/src/config.rs` - env loading, sidecar env allowlist, packaged-mode hardening
 - `src-tauri/src/menu.rs` - context menu items and the `show_context_menu` / `menu_action` commands
+- `src-tauri/src/downloads.rs` - takes over same-origin downloads, streams them to the Downloads folder with webview cookies, and serves the progress/panel commands
+- `src-tauri/src/downloads_ui.js` - injected download panel and anchor click interception, concatenated into the initialization script
 - `src-tauri/src/updater.rs` - signed update checks, download progress, install and restart for NSIS, AppImage, macOS, and the portable zip
 - `src-tauri/src/logger.rs` - sidecar log capture with redaction
-- `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own menu commands (allowed by default for local origins)
+- `src-tauri/capabilities/default.json` - intentionally `permissions: []`, the webview gets no core or plugin IPC, only the app's own commands (menu and downloads, allowed by default for local origins)
 - `.github/workflows/release.yml` - Windows x64 (installer, portable), Linux x64 (AppImage), and macOS arm64 (DMG) CI, combined checksums, tag releases
