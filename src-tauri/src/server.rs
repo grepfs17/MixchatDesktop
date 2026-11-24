@@ -1,22 +1,19 @@
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-use tauri::AppHandle;
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
-use tauri_plugin_shell::ShellExt;
 
 use crate::config::{AppConfig, Mode};
 use crate::logger::Logger;
 use crate::loopback::LoopbackGuard;
 
 pub struct ServerState {
-    app: AppHandle,
     config: AppConfig,
     logger: Arc<Logger>,
-    child: Mutex<Option<(u64, CommandChild)>>,
+    child: Mutex<Option<(u64, Sidecar)>>,
     loopback: Mutex<Option<LoopbackGuard>>,
     shutting_down: AtomicBool,
     restarting: AtomicBool,
@@ -28,10 +25,40 @@ pub struct ServerState {
     ready: AtomicBool,
 }
 
+/// A running sidecar. The monitor thread polls it, so `kill` performs the
+/// platform tree kill and reaps the process here, before the app moves on.
+struct Sidecar {
+    child: Arc<Mutex<Option<Child>>>,
+}
+
+impl Sidecar {
+    fn kill(&self, logger: &Logger) {
+        let mut guard = self.child.lock().unwrap();
+        let Some(child) = guard.as_mut() else {
+            return;
+        };
+        if let Err(error) = kill_tree(child) {
+            logger.warn(format!("failed to kill server: {error}"));
+            return;
+        }
+        let _ = child.wait();
+        *guard = None;
+    }
+}
+
+impl Drop for ServerState {
+    fn drop(&mut self) {
+        if let Ok(slot) = self.child.get_mut() {
+            if let Some((_, sidecar)) = slot.take() {
+                sidecar.kill(&self.logger);
+            }
+        }
+    }
+}
+
 impl ServerState {
-    pub fn new(app: AppHandle, config: AppConfig, logger: Arc<Logger>) -> Self {
+    pub fn new(config: AppConfig, logger: Arc<Logger>) -> Self {
         Self {
-            app,
             config,
             logger,
             child: Mutex::new(None),
@@ -67,8 +94,8 @@ impl ServerState {
     pub fn restart(self: &Arc<Self>) {
         self.logger.info("restart requested");
         self.generation.fetch_add(1, Ordering::SeqCst);
-        if let Some((_, child)) = self.child.lock().unwrap().take() {
-            let _ = child.kill();
+        if let Some((_, sidecar)) = self.child.lock().unwrap().take() {
+            sidecar.kill(&self.logger);
         }
         if self.config.mode == Mode::Dev {
             self.logger.warn("restart ignored in dev mode");
@@ -174,18 +201,17 @@ impl ServerState {
             ));
         }
 
-        let mut command = self
-            .app
-            .shell()
-            .sidecar("mixchat-node")
-            .map_err(|error| error.to_string())?
+        let binary = sidecar_path()?;
+        let mut command = Command::new(&binary);
+        command
             .arg(entry)
             .current_dir(&self.config.data_dir)
-            .set_process_group(true)
-            .kill_on_drop(true);
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         for (key, value) in &self.config.env {
-            command = command.env(key, value);
+            command.env(key, value);
         }
         // Readiness detection depends on the sidecar's "Server listening"
         // line; never let env (file or inherited) silence it.
@@ -196,62 +222,103 @@ impl ServerState {
             .map(|v| v.eq_ignore_ascii_case("disabled"))
             .unwrap_or(true)
         {
-            command = command.env("ASTRO_NODE_LOGGING", "info");
+            command.env("ASTRO_NODE_LOGGING", "info");
         }
 
-        let (mut rx, child) = command.spawn().map_err(|error| error.to_string())?;
+        // Its own process group (POSIX) and the hidden window flag (Windows)
+        // let a kill reach the whole tree and keep the console hidden.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut process = command.spawn().map_err(|error| {
+            format!("failed to start {}: {error}", binary.display())
+        })?;
+        let pid = process.id();
+        let stdout = process.stdout.take();
+        let stderr = process.stderr.take();
+        let process = Arc::new(Mutex::new(Some(process)));
+
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.ready.store(false, Ordering::SeqCst);
+        *self.child.lock().unwrap() = Some((
+            generation,
+            Sidecar {
+                child: process.clone(),
+            },
+        ));
 
         self.logger.info(format!(
-            "server started pid={} entry={}",
-            child.pid(),
+            "server started pid={pid} entry={}",
             entry.display()
         ));
-        *self.child.lock().unwrap() = Some((generation, child));
+
+        let mut readers = Vec::new();
+        if let Some(pipe) = stdout {
+            let state = self.clone();
+            readers.push(std::thread::spawn(move || {
+                read_server_output(&state, pipe, "stdout")
+            }));
+        }
+        if let Some(pipe) = stderr {
+            let state = self.clone();
+            readers.push(std::thread::spawn(move || {
+                read_server_output(&state, pipe, "stderr")
+            }));
+        }
 
         let state = self.clone();
-        tauri::async_runtime::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(bytes) => {
-                        // The server prints its listening line on startup, so
-                        // output means the restart counter can be cleared.
-                        state.attempts.store(0, Ordering::SeqCst);
-                        let text = String::from_utf8_lossy(&bytes);
-                        if text.to_ascii_lowercase().contains("listening") {
-                            state.ready.store(true, Ordering::SeqCst);
-                        }
-                        state.logger.server("stdout", &text);
-                    }
-                    CommandEvent::Stderr(bytes) => {
-                        state
-                            .logger
-                            .server("stderr", &String::from_utf8_lossy(&bytes));
-                    }
-                    CommandEvent::Error(error) => {
-                        state.logger.error(format!("server process error: {error}"));
-                    }
-                    CommandEvent::Terminated(payload) => {
-                        state.logger.error(format!(
-                            "server exited code={:?} signal={:?}",
-                            payload.code, payload.signal
-                        ));
-                        {
-                            let mut child = state.child.lock().unwrap();
-                            if child.as_ref().map(|(current, _)| *current) == Some(generation) {
-                                *child = None;
-                            }
-                        }
-                        if !state.shutting_down.load(Ordering::SeqCst)
-                            && state.generation.load(Ordering::SeqCst) == generation
-                        {
-                            state.schedule_restart();
-                        }
-                        break;
-                    }
-                    _ => {}
+        std::thread::spawn(move || {
+            let exit = loop {
+                let mut guard = process.lock().unwrap();
+                let Some(child) = guard.as_mut() else {
+                    // An explicit kill reaped it and already took the status.
+                    break None;
+                };
+                let outcome = child.try_wait();
+                drop(guard);
+                match outcome {
+                    Ok(Some(status)) => break Some(Ok(status)),
+                    Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+                    Err(error) => break Some(Err(error)),
                 }
+            };
+
+            // Drain the pipes before reporting, so the last lines land in
+            // order ahead of the exit notice.
+            for reader in readers {
+                let _ = reader.join();
+            }
+
+            match exit {
+                Some(Ok(status)) => state.logger.error(format!(
+                    "server exited code={:?} signal={:?}",
+                    status.code(),
+                    exit_signal(&status)
+                )),
+                Some(Err(error)) => {
+                    state.logger.error(format!("server process error: {error}"));
+                }
+                None => {}
+            }
+
+            {
+                let mut child = state.child.lock().unwrap();
+                if child.as_ref().map(|(current, _)| *current) == Some(generation) {
+                    *child = None;
+                }
+            }
+            if !state.shutting_down.load(Ordering::SeqCst)
+                && state.generation.load(Ordering::SeqCst) == generation
+            {
+                state.schedule_restart();
             }
         });
 
@@ -335,15 +402,120 @@ impl ServerState {
         if let Some(guard) = self.loopback.lock().unwrap().take() {
             drop(guard);
         }
-        if let Some((_, child)) = self.child.lock().unwrap().take() {
-            if let Err(error) = child.kill() {
-                self.logger.warn(format!("failed to kill server: {error}"));
+        if let Some((_, sidecar)) = self.child.lock().unwrap().take() {
+            sidecar.kill(&self.logger);
+        }
+    }
+}
+
+/// Resolve the bundled sidecar next to the running executable, matching how
+/// Tauri places `externalBin` files.
+fn sidecar_path() -> Result<PathBuf, String> {
+    let executable = tauri::utils::platform::current_exe()
+        .map_err(|error| format!("cannot locate the app executable: {error}"))?;
+    let directory = executable
+        .parent()
+        .ok_or_else(|| "app executable has no parent directory".to_string())?;
+    // Tests run from target/<profile>/deps, one level below the binaries.
+    let directory = if directory.ends_with("deps") {
+        directory.parent().unwrap_or(directory)
+    } else {
+        directory
+    };
+    let path = directory.join("mixchat-node");
+    #[cfg(windows)]
+    let path = {
+        let mut path = path;
+        path.as_mut_os_string().push(".exe");
+        path
+    };
+    Ok(path)
+}
+
+/// Read one sidecar pipe line by line. Line breaks are kept so the log file
+/// records exactly what the server printed.
+fn read_server_output(state: &Arc<ServerState>, pipe: impl Read, stream: &'static str) {
+    let mut reader = BufReader::new(pipe);
+    let mut buffer = Vec::new();
+    loop {
+        buffer.clear();
+        match reader.read_until(b'\n', &mut buffer) {
+            Ok(0) => break,
+            Ok(_) => {
+                let text = String::from_utf8_lossy(&buffer);
+                if stream == "stdout" {
+                    // The server prints its listening line on startup, so
+                    // output means the restart counter can be cleared.
+                    state.attempts.store(0, Ordering::SeqCst);
+                    if text.to_ascii_lowercase().contains("listening") {
+                        state.ready.store(true, Ordering::SeqCst);
+                    }
+                }
+                state.logger.server(stream, &text);
+            }
+            Err(error) => {
+                state
+                    .logger
+                    .error(format!("server {stream} read error: {error}"));
+                break;
             }
         }
     }
 }
 
+#[cfg(unix)]
+fn kill_tree(child: &mut Child) -> std::io::Result<()> {
+    // The sidecar runs as its own process group, so a signal reaches helpers
+    // it started as well.
+    let pgid = child.id() as libc::pid_t;
+    if unsafe { libc::killpg(pgid, libc::SIGKILL) } != 0 {
+        let error = std::io::Error::last_os_error();
+        // ESRCH: every process in the group already exited.
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(windows)]
+fn kill_tree(child: &mut Child) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+
+    // taskkill removes the tree, which is what the job object used to do.
+    // Fall back to the direct process if it fails.
+    let pid = child.id().to_string();
+    let killed = Command::new("taskkill")
+        .args(["/PID", pid.as_str(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !killed {
+        child.kill()?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
 fn health_host(host: &str) -> &str {
+
     match host {
         "0.0.0.0" => "127.0.0.1",
         "::" => "::1",

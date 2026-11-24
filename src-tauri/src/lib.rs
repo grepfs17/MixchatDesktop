@@ -26,12 +26,13 @@ pub fn run() {
         // The webview has no IPC permissions, so the plugin's click interceptor
         // must stay off. It prevents the default action and then fails to open
         // the URL. Rust-side navigation handling opens external links instead.
+        // tauri-plugin-shell does the same interception with JS it always
+        // injects, and it has no switch to turn that off, so it is not used.
         .plugin(
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
                 .build(),
         )
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .register_uri_scheme_protocol(tabs::SCHEME, |_ctx, request| {
@@ -74,11 +75,7 @@ pub fn run() {
                 redact_url(&app_config.url)
             ));
 
-            let state = Arc::new(ServerState::new(
-                handle.clone(),
-                app_config,
-                logger.clone(),
-            ));
+            let state = Arc::new(ServerState::new(app_config, logger.clone()));
             app.manage(state.clone());
 
             #[cfg(unix)]
