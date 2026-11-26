@@ -370,10 +370,10 @@ fn about_html(version: &str) -> String {
   <p class="desc">Tauri desktop shell that runs the Mixchat server locally.</p>
   <nav aria-label="Project links">
     <ul>
+      <li><a href="https://mixchat-desktop.grepfs.xyz/changelog/">Changelog</a></li>
       <li><a href="https://github.com/grepfs17/MixchatDesktop">GitHub repository</a></li>
       <li><a href="https://github.com/grepfs17/MixchatDesktop/issues">Report an issue</a></li>
       <li><a href="https://github.com/grepfs17/Mixchat">Mixchat source</a></li>
-      <li><a href="https://mixchat.grepfs.xyz/">mixchat.grepfs.xyz</a></li>
     </ul>
   </nav>
   <p class="meta">Licensed under AGPL-3.0 · © 2026 Mixchat</p>
