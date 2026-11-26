@@ -40,7 +40,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             menu::show_context_menu,
+            menu::show_menu,
             menu::menu_action,
+            menu::read_clipboard_text,
             downloads::download_start,
             downloads::download_snapshot,
             downloads::download_cancel,
@@ -56,7 +58,6 @@ pub fn run() {
             tabs::tabs_select_index,
             tabs::tab_meta
         ])
-        .on_menu_event(menu::handle)
         .setup(|app| {
             app.handle().set_theme(Some(tauri::Theme::Dark));
             let handle = app.handle().clone();
@@ -64,7 +65,6 @@ pub fn run() {
             downloads::init_tls();
             app.manage(downloads::Downloads::new(&app_config.url));
             app.manage(tabs::Tabs::new());
-            app.manage(menu::ContextTarget::default());
             let auto_update =
                 app_config.mode == config::Mode::Packaged && updater::updates_supported();
             let logger = Arc::new(Logger::new(&app_config.log_dir)?);

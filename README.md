@@ -65,6 +65,9 @@ System Settings, Privacy & Security.
   tab. Muting silences chat sounds and the stream together.
 - Hidden tabs keep their page, chat connection, and stream alive. Mute the
   background streams you do not want to hear.
+- The menu button at the left of the tab strip opens the same options as the
+  right-click menu, without the Copy/Cut/Paste/Select All items, and shows each
+  command's keyboard shortcut.
 - **Open stream in new window** in the right-click menu duplicates the current
   stream into a separate window.
 - On macOS, muting a tab suspends media playback instead of changing a gain;

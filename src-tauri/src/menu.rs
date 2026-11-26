@@ -1,116 +1,192 @@
-use std::sync::Mutex;
-
-use tauri::menu::{ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, Webview};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::server::ServerState;
 
-/// The webview that opened the most recent context menu. Menu events do not
-/// carry a target, so they use this to act on the window the user right-clicked.
-#[derive(Default)]
-pub struct ContextTarget(Mutex<Option<String>>);
-
-/// Flat menu shown on right-click. Submenus are inlined because popup menus
-/// render one level at a time.
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let copy = PredefinedMenuItem::copy(app, Some("Copy"))?;
-    let cut = PredefinedMenuItem::cut(app, Some("Cut"))?;
-    let paste = PredefinedMenuItem::paste(app, Some("Paste"))?;
-    let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))?;
-
-    let version = app.package_info().version.to_string();
-    let new_window = MenuItem::with_id(app, "new-window", "New window", true, Some("CmdOrCtrl+N"))?;
-    let new_tab = MenuItem::with_id(app, "new-tab", "New tab", true, Some("CmdOrCtrl+T"))?;
-    let open_stream_window = MenuItem::with_id(
-        app,
-        "open-stream-window",
-        "Open stream in new window",
-        true,
-        None::<&str>,
-    )?;
-    let close_tab = MenuItem::with_id(app, "close-tab", "Close tab", true, Some("CmdOrCtrl+W"))?;
-    let close_window = MenuItem::with_id(
-        app,
-        "close-window",
-        "Close window",
-        true,
-        Some("CmdOrCtrl+Shift+W"),
-    )?;
-    let toggle_mute = MenuItem::with_id(
-        app,
-        "toggle-mute",
-        "Mute or unmute tab",
-        true,
-        Some("CmdOrCtrl+Shift+M"),
-    )?;
-    let about = MenuItem::with_id(
-        app,
-        "about",
-        format!("About Mixchat ({version})"),
-        true,
-        None::<&str>,
-    )?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
-    let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
-    #[cfg(debug_assertions)]
-    let devtools = MenuItem::with_id(app, "devtools", "Toggle DevTools", true, Some("F12"))?;
-    let fullscreen = MenuItem::with_id(app, "fullscreen", "Toggle Fullscreen", true, Some("F11"))?;
-    let restart = MenuItem::with_id(app, "restart-server", "Restart server", true, None::<&str>)?;
-    let logs = MenuItem::with_id(app, "open-logs", "Open logs", true, None::<&str>)?;
-    let check_updates = MenuItem::with_id(
-        app,
-        "check-updates",
-        "Check for updates",
-        true,
-        None::<&str>,
-    )?;
-    let twitch_login = MenuItem::with_id(
-        app,
-        "twitch-login",
-        "Log in to Twitch player",
-        true,
-        Some("CmdOrCtrl+Shift+T"),
-    )?;
-    let twitch_help =
-        MenuItem::with_id(app, "twitch-help", "Twitch login help", true, None::<&str>)?;
-
-    let menu = Menu::new(app)?;
-    menu.append(&copy)?;
-    menu.append(&cut)?;
-    menu.append(&paste)?;
-    menu.append(&select_all)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&new_window)?;
-    menu.append(&new_tab)?;
-    menu.append(&open_stream_window)?;
-    menu.append(&close_tab)?;
-    menu.append(&close_window)?;
-    menu.append(&toggle_mute)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&reload)?;
-    #[cfg(debug_assertions)]
-    menu.append(&devtools)?;
-    menu.append(&fullscreen)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&twitch_login)?;
-    menu.append(&twitch_help)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&restart)?;
-    menu.append(&logs)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&check_updates)?;
-    menu.append(&about)?;
-    menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&quit)?;
-    Ok(menu)
+/// A single row in the custom HTML menu.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+enum MenuItemDef {
+    Separator,
+    Item {
+        id: String,
+        label: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        shortcut: Option<String>,
+    },
 }
 
-pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    let target = app
-        .try_state::<ContextTarget>()
-        .and_then(|state| state.0.lock().ok().and_then(|target| target.clone()));
-    handle_id(app, target.as_deref(), event.id().as_ref());
+/// Payload handed to the webview's menu overlay.
+#[derive(Serialize)]
+struct MenuPayload {
+    x: f64,
+    y: f64,
+    items: Vec<MenuItemDef>,
+}
+
+/// Human-readable shortcut for a menu item: "Ctrl+Shift+M" on Windows and
+/// Linux, "⇧⌘M" on macOS.
+fn shortcut(accelerator: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        accelerator
+            .replace("CmdOrCtrl+Shift+", "\u{21e7}\u{2318}")
+            .replace("CmdOrCtrl+", "\u{2318}")
+            .replace("Shift+", "\u{21e7}")
+            .replace("Alt+", "\u{2325}")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        accelerator.replace("CmdOrCtrl", "Ctrl")
+    }
+}
+
+/// The flat item list shown in the menu. `include_edit` adds the clipboard and
+/// selection items, which only the right-click context menu carries.
+fn menu_items<R: Runtime>(app: &AppHandle<R>, include_edit: bool) -> Vec<MenuItemDef> {
+    use MenuItemDef::{Item, Separator};
+    let version = app.package_info().version.to_string();
+    let mut items = Vec::new();
+
+    if include_edit {
+        items.push(Item {
+            id: "copy".into(),
+            label: "Copy".into(),
+            shortcut: Some(shortcut("CmdOrCtrl+C")),
+        });
+        items.push(Item {
+            id: "cut".into(),
+            label: "Cut".into(),
+            shortcut: Some(shortcut("CmdOrCtrl+X")),
+        });
+        items.push(Item {
+            id: "paste".into(),
+            label: "Paste".into(),
+            shortcut: Some(shortcut("CmdOrCtrl+V")),
+        });
+        items.push(Item {
+            id: "select-all".into(),
+            label: "Select All".into(),
+            shortcut: Some(shortcut("CmdOrCtrl+A")),
+        });
+        items.push(Separator);
+    }
+
+    items.push(Item {
+        id: "new-window".into(),
+        label: "New window".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+N")),
+    });
+    items.push(Item {
+        id: "new-tab".into(),
+        label: "New tab".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+T")),
+    });
+    items.push(Item {
+        id: "open-stream-window".into(),
+        label: "Open stream in new window".into(),
+        shortcut: None,
+    });
+    items.push(Item {
+        id: "close-tab".into(),
+        label: "Close tab".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+W")),
+    });
+    items.push(Item {
+        id: "close-window".into(),
+        label: "Close window".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+Shift+W")),
+    });
+    items.push(Item {
+        id: "toggle-mute".into(),
+        label: "Mute or unmute tab".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+Shift+M")),
+    });
+    items.push(Separator);
+
+    items.push(Item {
+        id: "reload".into(),
+        label: "Reload".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+R")),
+    });
+    #[cfg(debug_assertions)]
+    items.push(Item {
+        id: "devtools".into(),
+        label: "Toggle DevTools".into(),
+        shortcut: Some(shortcut("F12")),
+    });
+    items.push(Item {
+        id: "fullscreen".into(),
+        label: "Toggle Fullscreen".into(),
+        shortcut: Some(shortcut("F11")),
+    });
+    items.push(Separator);
+
+    items.push(Item {
+        id: "twitch-login".into(),
+        label: "Log in to Twitch player".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+Shift+T")),
+    });
+    items.push(Item {
+        id: "twitch-help".into(),
+        label: "Twitch login help".into(),
+        shortcut: None,
+    });
+    items.push(Separator);
+
+    items.push(Item {
+        id: "restart-server".into(),
+        label: "Restart server".into(),
+        shortcut: None,
+    });
+    items.push(Item {
+        id: "open-logs".into(),
+        label: "Open logs".into(),
+        shortcut: None,
+    });
+    items.push(Separator);
+
+    items.push(Item {
+        id: "check-updates".into(),
+        label: "Check for updates".into(),
+        shortcut: None,
+    });
+    items.push(Item {
+        id: "about".into(),
+        label: format!("About Mixchat ({version})"),
+        shortcut: None,
+    });
+    items.push(Separator);
+
+    items.push(Item {
+        id: "quit".into(),
+        label: "Quit".into(),
+        shortcut: Some(shortcut("CmdOrCtrl+Q")),
+    });
+
+    items
+}
+
+/// Render the custom menu overlay in `webview` at the given viewport point.
+fn open_custom_menu<R: Runtime>(
+    app: &AppHandle<R>,
+    webview: &Webview<R>,
+    include_edit: bool,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let payload = MenuPayload {
+        x,
+        y,
+        items: menu_items(app, include_edit),
+    };
+    let json = serde_json::to_string(&payload).map_err(|error| error.to_string())?;
+    webview
+        .eval(format!(
+            "window.__MIXCHAT_MENU__&&window.__MIXCHAT_MENU__.open({json});"
+        ))
+        .map_err(|error| error.to_string())
 }
 
 fn target_webview<R: Runtime>(app: &AppHandle<R>, target: Option<&str>) -> Option<Webview<R>> {
@@ -217,18 +293,50 @@ pub fn handle_id<R: Runtime>(app: &AppHandle<R>, target: Option<&str>, id: &str)
     }
 }
 
+/// Right-click context menu: renders the custom menu (with clipboard items) in
+/// the requesting content webview at the pointer.
 #[tauri::command]
-pub fn show_context_menu<R: Runtime>(app: AppHandle<R>, webview: Webview<R>) -> Result<(), String> {
-    if let Some(state) = app.try_state::<ContextTarget>() {
-        let mut target = state.0.lock().unwrap_or_else(|poison| poison.into_inner());
-        *target = Some(webview.label().to_string());
-    }
-    let menu = build(&app).map_err(|error| error.to_string())?;
-    menu.popup(webview.window())
-        .map_err(|error| error.to_string())
+pub fn show_context_menu<R: Runtime>(
+    app: AppHandle<R>,
+    webview: Webview<R>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    open_custom_menu(&app, &webview, true, x, y)
+}
+
+/// App menu opened from the tab strip's menu button (no clipboard items). It
+/// renders in the workspace's active content webview just below the strip.
+#[tauri::command]
+pub fn show_menu<R: Runtime>(app: AppHandle<R>, webview: Webview<R>) -> Result<(), String> {
+    let label = crate::tabs::active_content_label(&app, webview.label())
+        .ok_or_else(|| "no active content webview".to_string())?;
+    let target = app
+        .get_webview(&label)
+        .ok_or_else(|| "active webview is gone".to_string())?;
+    let _ = target.set_focus();
+    open_custom_menu(&app, &target, false, 8.0, 6.0)
 }
 
 #[tauri::command]
 pub fn menu_action<R: Runtime>(app: AppHandle<R>, webview: Webview<R>, id: String) {
     handle_id(&app, Some(webview.label()), &id);
+}
+
+/// Clipboard text for the Paste menu item. Webviews refuse script-initiated
+/// clipboard reads, so the shell reads the OS clipboard and returns the text to
+/// the requesting webview, which inserts it at the caret. Runs off the main
+/// thread because an X11 clipboard owner can take a while to answer.
+#[tauri::command(async)]
+pub fn read_clipboard_text() -> Result<Option<String>, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    match clipboard.get_text() {
+        Ok(text) => Ok((!text.is_empty()).then_some(text)),
+        // Empty clipboard or contents in a format other than text.
+        Err(arboard::Error::ContentNotAvailable) => Ok(None),
+        Err(error) => {
+            eprintln!("[clipboard] read failed: {error}");
+            Ok(None)
+        }
+    }
 }

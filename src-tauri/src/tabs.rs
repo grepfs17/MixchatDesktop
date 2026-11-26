@@ -440,8 +440,11 @@ fn content_init_script() -> String {
     concat!(
         r#"window.__MIXCHAT_SHELL__ = 'tauri';
 window.addEventListener('contextmenu', (event) => {
+  // Without the injected menu there is nothing to show, so leave the
+  // platform's own context menu alone instead of swallowing the click.
+  if (!window.__MIXCHAT_MENU__) return;
   event.preventDefault();
-  window.__TAURI_INTERNALS__.invoke('show_context_menu');
+  window.__TAURI_INTERNALS__.invoke('show_context_menu', { x: event.clientX, y: event.clientY });
 });
 window.addEventListener('keydown', (event) => {
   if (event.repeat || event.altKey) return;
@@ -529,6 +532,8 @@ window.addEventListener('keydown', (event) => {
 })();"#,
         "\n",
         include_str!("downloads_ui.js"),
+        "\n",
+        include_str!("menu_ui.js"),
     )
     .to_string()
 }
@@ -1006,6 +1011,17 @@ pub(crate) fn new_tab_for_webview<R: Runtime>(app: &AppHandle<R>, webview_label:
     }
 }
 
+/// Active content webview label for the workspace a shell (tab strip) label
+/// belongs to. Used to aim menu actions from the strip's menu button.
+pub(crate) fn active_content_label<R: Runtime>(
+    app: &AppHandle<R>,
+    shell_label: &str,
+) -> Option<String> {
+    let manager = tabs(app)?;
+    let window = manager.window_for_shell(shell_label)?;
+    manager.active_webview(&window)
+}
+
 pub(crate) fn close_active_tab<R: Runtime>(app: &AppHandle<R>, webview_label: &str) {
     if let Some((window, tab_id)) = tab_for_webview(app, webview_label) {
         close_tab(app, &window, &tab_id);
@@ -1327,10 +1343,14 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <div id="strip">
-  <div id="tabs" role="tablist" aria-label="Stream tabs"></div>
-  <button id="add-tab" class="bar-button" type="button" title="New tab (Ctrl+T)" aria-label="New tab">
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+  <button id="menu-button" class="bar-button" type="button" title="Menu" aria-label="Menu">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>
   </button>
+  <div id="tabs" role="tablist" aria-label="Stream tabs">
+    <button id="add-tab" class="bar-button" type="button" title="New tab (Ctrl+T)" aria-label="New tab">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+    </button>
+  </div>
   <button id="new-window" class="bar-button" type="button" title="New window (Ctrl+N)" aria-label="New window">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="9" height="9" rx="1.5"/><path d="M5 4V2.5h9V11h-1.5"/></svg>
   </button>
@@ -1340,6 +1360,7 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
   const bridge = window.__TAURI_INTERNALS__;
   const invoke = (command, args) => bridge.invoke(command, args || {});
   const tabsEl = document.getElementById('tabs');
+  const addTab = document.getElementById('add-tab');
   const icons = {
     sound: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h2.5L9 3v10L5.5 10H3z"/><path d="M11.5 5.5a3.5 3.5 0 0 1 0 5"/></svg>',
     muted: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h2.5L9 3v10L5.5 10H3z"/><path d="M11 6l3 4M14 6l-3 4"/></svg>',
@@ -1365,6 +1386,9 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
     const focusedTab = focused && focused.closest ? focused.closest('.tab') : null;
     const focusedTabId = focusedTab ? focusedTab.dataset.id : '';
     const focusedRole = focused && focused.dataset ? focused.dataset.role || '' : '';
+    // The add button lives inside the container that gets cleared below, so
+    // clearing it drops focus and the button has to be focused again.
+    const focusedAddTab = focused === addTab;
 
     tabsEl.textContent = '';
     for (const tab of current.tabs) {
@@ -1377,7 +1401,7 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
       // Roving tabindex: one tab in the Tab order, arrow keys move between.
       el.tabIndex = active ? 0 : -1;
       el.addEventListener('focus', () => {
-        for (const other of tabsEl.children) {
+        for (const other of tabsEl.querySelectorAll('.tab')) {
           other.tabIndex = other === el ? 0 : -1;
         }
       });
@@ -1423,7 +1447,10 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
       el.append(title, mute, close);
       tabsEl.append(el);
     }
-    if (focusedTabId) {
+    tabsEl.append(addTab);
+    if (focusedAddTab) {
+      addTab.focus();
+    } else if (focusedTabId) {
       for (const el of tabsEl.children) {
         if (el.dataset.id !== focusedTabId) continue;
         const target =
@@ -1455,6 +1482,7 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
 
   window.__MIXCHAT_TABS__ = { render };
 
+  document.getElementById('menu-button').addEventListener('click', () => invoke('show_menu'));
   document.getElementById('add-tab').addEventListener('click', () => invoke('tabs_new'));
   document.getElementById('new-window').addEventListener('click', () => invoke('tabs_new_window'));
   document.addEventListener('contextmenu', (event) => event.preventDefault());
