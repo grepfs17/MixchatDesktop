@@ -86,7 +86,7 @@ fn menu_items<R: Runtime>(app: &AppHandle<R>, include_edit: bool) -> Vec<MenuIte
     items.push(Item {
         id: "open-stream-window".into(),
         label: "Open stream in new window".into(),
-        shortcut: None,
+        shortcut: Some(shortcut("CmdOrCtrl+Shift+O")),
     });
     items.push(Item {
         id: "close-tab".into(),
@@ -190,9 +190,17 @@ fn open_custom_menu<R: Runtime>(
 }
 
 fn target_webview<R: Runtime>(app: &AppHandle<R>, target: Option<&str>) -> Option<Webview<R>> {
-    target
+    let webview = target
         .and_then(|label| app.get_webview(label))
-        .or_else(|| crate::tabs::first_content_webview(app))
+        .or_else(|| crate::tabs::first_content_webview(app))?;
+    // The tab strip is not a content webview. Aim every action at the workspace's
+    // active content so shortcuts work from either the strip or the page.
+    if let Some(label) = crate::tabs::active_content_label(app, webview.label()) {
+        if let Some(content) = app.get_webview(&label) {
+            return Some(content);
+        }
+    }
+    Some(webview)
 }
 
 pub fn handle_id<R: Runtime>(app: &AppHandle<R>, target: Option<&str>, id: &str) {
@@ -206,9 +214,7 @@ pub fn handle_id<R: Runtime>(app: &AppHandle<R>, target: Option<&str>, id: &str)
         }
         "open-stream-window" => {
             if let Some(webview) = target_webview(app, target) {
-                crate::tabs::duplicate_in_new_window(app, webview.label());
-            } else {
-                crate::tabs::create_window(app, None);
+                crate::tabs::open_stream_window(app, webview.label());
             }
         }
         "close-tab" => {

@@ -68,8 +68,9 @@ System Settings, Privacy & Security.
 - The menu button at the left of the tab strip opens the same options as the
   right-click menu, without the Copy/Cut/Paste/Select All items, and shows each
   command's keyboard shortcut.
-- **Open stream in new window** in the right-click menu duplicates the current
-  stream into a separate window.
+- `Ctrl/Cmd+Shift+O` or **Open stream in new window** in the right-click menu
+  opens the current channel in a standalone player window with only the stream
+  embed, no tabs or chat.
 - On macOS, muting a tab suspends media playback instead of changing a gain;
   unmuting resumes it.
 

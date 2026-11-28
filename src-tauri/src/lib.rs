@@ -56,7 +56,8 @@ pub fn run() {
             tabs::tabs_toggle_mute,
             tabs::tabs_cycle,
             tabs::tabs_select_index,
-            tabs::tab_meta
+            tabs::tab_meta,
+            tabs::open_stream_player
         ])
         .setup(|app| {
             app.handle().set_theme(Some(tauri::Theme::Dark));

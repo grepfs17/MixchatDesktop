@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::webview::{NewWindowResponse, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, WebviewBuilder, WebviewWindowBuilder};
 use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalSize, Runtime, Webview, WebviewUrl,
     Window, WindowEvent,
@@ -460,6 +460,9 @@ window.addEventListener('keydown', (event) => {
   } else if (mod && event.shiftKey && key === 'm') {
     event.preventDefault();
     act('toggle-mute');
+  } else if (mod && event.shiftKey && key === 'o') {
+    event.preventDefault();
+    act('open-stream-window');
   } else if (mod && event.shiftKey && event.key === 'Tab') {
     event.preventDefault();
     act('prev-tab');
@@ -1058,12 +1061,146 @@ pub(crate) fn select_index_for_webview<R: Runtime>(
     }
 }
 
-pub(crate) fn duplicate_in_new_window<R: Runtime>(app: &AppHandle<R>, webview_label: &str) {
-    let target = app
-        .get_webview(webview_label)
-        .and_then(|webview| webview.url().ok())
-        .map(|url| url.to_string());
-    create_window(app, target);
+/// Label of the standalone player window. Reusing one label means asking for
+/// another channel navigates the existing player instead of stacking windows.
+const PLAYER_WINDOW: &str = "stream-player";
+
+/// Twitch logins are ASCII letters, digits, and underscores. Rejecting anything
+/// else keeps the channel safe to splice into the player URL.
+fn valid_channel(channel: &str) -> bool {
+    !channel.is_empty()
+        && channel
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
+fn channel_from_url(url: &tauri::Url) -> Option<String> {
+    let mut segments = url.path_segments()?;
+    if segments.next()? != "channel" {
+        return None;
+    }
+    let channel = segments.next()?;
+    if segments.next().is_some() || !valid_channel(channel) {
+        return None;
+    }
+    Some(channel.to_string())
+}
+
+/// Ask the page which channel it is showing. The URL path carries the channel
+/// after a channel switch, but a restored session can render a channel while
+/// the page stays on `/`, so fall back to the channel link in the chat header.
+const CHANNEL_LOOKUP: &str = r#"
+(function () {
+  let channel = '';
+  const match = window.location.pathname.match(/^\/channel\/([^/]+)$/);
+  if (match) {
+    try { channel = decodeURIComponent(match[1]); } catch { channel = match[1]; }
+  }
+  if (!channel) {
+    const link = document.querySelector('a.channel-link[href*="twitch.tv/"]');
+    if (link) {
+      try {
+        const url = new URL(link.href);
+        channel = url.pathname.replace(/^\/+/, '').split('/')[0] || '';
+      } catch {}
+    }
+  }
+  if (!channel) return;
+  window.__TAURI_INTERNALS__.invoke('open_stream_player', { channel }).catch(() => {});
+})();
+"#;
+
+fn player_parent<R: Runtime>(app: &AppHandle<R>) -> String {
+    server_url(app)
+        .parse::<tauri::Url>()
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .map(|host| {
+            if host.parse::<std::net::IpAddr>().is_ok() {
+                "mixchat.local".to_string()
+            } else {
+                host
+            }
+        })
+        .unwrap_or_else(|| "localhost".to_string())
+}
+
+fn open_player_window<R: Runtime>(app: &AppHandle<R>, channel: &str) {
+    if !valid_channel(channel) {
+        return;
+    }
+    let Ok(mut url) = "https://player.twitch.tv/".parse::<tauri::Url>() else {
+        return;
+    };
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("channel", channel);
+        query.append_pair("parent", &player_parent(app));
+        query.append_pair("autoplay", "true");
+    }
+    let title = format!("Mixchat - {channel}");
+
+    if let Some(window) = app.get_webview_window(PLAYER_WINDOW) {
+        let _ = window.navigate(url);
+        let _ = window.set_title(&title);
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    // Same event-loop constraint as the Twitch child windows: WebView2 builds
+    // deadlock when a window is created from a Tauri callback on the main
+    // thread, so build the player on its own thread.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let navigation_app = app.clone();
+        let window = WebviewWindowBuilder::new(&app, PLAYER_WINDOW, WebviewUrl::External(url))
+            .title(title)
+            .theme(Some(tauri::Theme::Dark))
+            .inner_size(1280.0, 720.0)
+            .min_inner_size(480.0, 270.0)
+            .center()
+            .on_navigation(move |target| {
+                if matches!(target.scheme(), "http" | "https") {
+                    return true;
+                }
+                crate::open_external_url(&navigation_app, target);
+                false
+            })
+            .on_new_window(|_, _| NewWindowResponse::Deny)
+            .build();
+        match window {
+            Ok(window) => {
+                let _ = window.set_theme(Some(tauri::Theme::Dark));
+                let _ = window.set_focus();
+            }
+            Err(error) => report_failure(
+                &app,
+                &format!("[stream] failed to open player window: {error}"),
+            ),
+        }
+    });
+}
+
+/// Open the channel the current tab is watching in a standalone window that
+/// shows only Twitch's player. The window has no tab strip, chat, or shell
+/// command surface, so it is the stream embed on its own.
+pub(crate) fn open_stream_window<R: Runtime>(app: &AppHandle<R>, webview_label: &str) {
+    let Some(webview) = app.get_webview(webview_label) else {
+        return;
+    };
+    if let Some(channel) = webview.url().ok().as_ref().and_then(channel_from_url) {
+        open_player_window(app, &channel);
+        return;
+    }
+    let _ = webview.eval(CHANNEL_LOOKUP);
+}
+
+/// Called by the page once it resolves the channel it is displaying.
+#[tauri::command]
+pub fn open_stream_player<R: Runtime>(app: AppHandle<R>, channel: String) {
+    open_player_window(&app, &channel);
 }
 
 pub(crate) fn reload_all<R: Runtime>(app: &AppHandle<R>) {
@@ -1511,6 +1648,9 @@ const TAB_STRIP_HTML: &str = r#"<!doctype html>
     } else if (event.shiftKey && key === 'm' && current.active) {
       event.preventDefault();
       invoke('tabs_toggle_mute', { id: current.active });
+    } else if (event.shiftKey && key === 'o' && current.active) {
+      event.preventDefault();
+      invoke('menu_action', { id: 'open-stream-window' });
     } else if (!event.shiftKey && /^[1-9]$/.test(key)) {
       event.preventDefault();
       invoke('tabs_select_index', { index: Number(key) });
@@ -1540,6 +1680,23 @@ mod tests {
         assert_eq!(window_title("Mixchat"), "Mixchat");
         assert_eq!(window_title(""), "Mixchat");
         assert_eq!(window_title("somechannel"), "Mixchat - somechannel");
+    }
+
+    #[test]
+    fn extracts_player_channel_from_content_url() {
+        let url: tauri::Url = "http://localhost:3000/channel/somechannel?mixchat-shell=tauri"
+            .parse()
+            .unwrap();
+        assert_eq!(channel_from_url(&url), Some("somechannel".to_string()));
+
+        let home: tauri::Url = "http://localhost:3000/".parse().unwrap();
+        assert_eq!(channel_from_url(&home), None);
+
+        let nested: tauri::Url = "http://localhost:3000/channel/a/b".parse().unwrap();
+        assert_eq!(channel_from_url(&nested), None);
+
+        let unsafe_name: tauri::Url = "http://localhost:3000/channel/a%2Fb".parse().unwrap();
+        assert_eq!(channel_from_url(&unsafe_name), None);
     }
 
     #[test]
